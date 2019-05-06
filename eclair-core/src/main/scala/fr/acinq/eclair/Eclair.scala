@@ -25,8 +25,9 @@ import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import com.typesafe.config.ConfigFactory
 import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{Block, ByteVector32, MilliSatoshi, OutPoint, Satoshi, Transaction, TxOut}
+import fr.acinq.bitcoin.{Block, ByteVector32, MilliSatoshi, OutPoint, Satoshi, Script, Transaction, TxOut}
 import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, BatchingBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.channel.Register.{Forward, ForwardShortId}
 import fr.acinq.eclair.channel._
@@ -260,7 +261,12 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       port = appKit.nodeParams.config.getInt("bitcoind.rpcport"))
     )
 
-    val fundingTx = Await.result(extendedBitcoinClient.getTransaction(fundingTxId.toHex), 30 seconds)
+    val (fundingTx, finalAddress) = Await.result(for {
+      funding <- extendedBitcoinClient.getTransaction(fundingTxId.toHex)
+      address <- new BitcoinCoreWallet(extendedBitcoinClient.rpcClient).getFinalAddress
+    } yield (funding, address), 30 seconds)
+
+    val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
 
     val fundingOutput = fundingTx.txOut(outputIndex)
     val inputInfo = Transactions.InputInfo(
@@ -269,7 +275,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       redeemScript = ByteVector.empty
     )
 
-    val commitments = makeDummyCommitment(keyPath, nodeUri.nodeId, channelId, shortChannelId, inputInfo)
+    val commitments = makeDummyCommitment(keyPath, nodeUri.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey)
     appKit.switchboard ? Peer.Connect(nodeUri, Set(commitments))
 
     "in progress"
@@ -295,7 +301,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       publicAddresses = appKit.nodeParams.publicAddresses)
   )
 
-  def makeDummyCommitment(channelKeyPath: KeyPath, remoteNodeId: PublicKey, channelId: ByteVector32, shortChannelId: ShortChannelId, commitInput: InputInfo) = DATA_NORMAL(
+  def makeDummyCommitment(channelKeyPath: KeyPath, remoteNodeId: PublicKey, channelId: ByteVector32, shortChannelId: ShortChannelId, commitInput: InputInfo, finalScriptPubkey: ByteVector) = DATA_NORMAL(
     commitments = Commitments(
       localParams = LocalParams(
         nodeId = appKit.nodeParams.nodeId,
@@ -307,7 +313,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
         htlcMinimumMsat = 0,
         maxAcceptedHtlcs = 0,
         isFunder = true,
-        defaultFinalScriptPubKey = hex"00",
+        defaultFinalScriptPubKey = finalScriptPubkey,
         globalFeatures = hex"00",
         localFeatures = hex"00"
       ),
