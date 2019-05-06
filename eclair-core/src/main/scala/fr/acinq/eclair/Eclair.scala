@@ -254,24 +254,23 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
     val shortChannelId = ShortChannelId(shortChannelIdSerialized)
     val TxCoordinates(_, _, outputIndex) = ShortChannelId.coordinates(shortChannelId)
 
-    val extendedBitcoinClient = new ExtendedBitcoinClient(new BasicBitcoinJsonRPCClient(
+    val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
       user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
       password = appKit.nodeParams.config.getString("bitcoind.rpcpassword"),
       host = appKit.nodeParams.config.getString("bitcoind.host"),
-      port = appKit.nodeParams.config.getInt("bitcoind.rpcport"))
+      port = appKit.nodeParams.config.getInt("bitcoind.rpcport")
     )
 
     val (fundingTx, finalAddress) = Await.result(for {
-      funding <- extendedBitcoinClient.getTransaction(fundingTxId.toHex)
-      address <- new BitcoinCoreWallet(extendedBitcoinClient.rpcClient).getFinalAddress
+      funding <- new ExtendedBitcoinClient(bitcoinRpcClient).getTransaction(fundingTxId.toHex)
+      address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
     } yield (funding, address), 30 seconds)
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
 
-    val fundingOutput = fundingTx.txOut(outputIndex)
     val inputInfo = Transactions.InputInfo(
       outPoint = OutPoint(fundingTx.hash, outputIndex),
-      txOut = fundingOutput,
+      txOut = fundingTx.txOut(outputIndex),
       redeemScript = ByteVector.empty
     )
 
