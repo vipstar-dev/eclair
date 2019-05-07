@@ -104,7 +104,7 @@ trait Eclair {
 
   def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector]
 
-  def attemptChannelRecovery(keyPathSerialized: ByteVector, fundingTxId: ByteVector32, channelId: ByteVector32, shortChannelIdSerialized: String, uri: String)(implicit timeout: Timeout): String
+  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): String
 
 }
 
@@ -245,14 +245,13 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
     }
   }
 
-  override def attemptChannelRecovery(keyPathSerialized: ByteVector, fundingTxId: ByteVector32, channelId: ByteVector32, shortChannelIdSerialized: String, uri: String)(implicit timeout: Timeout): String = {
+  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): String = {
 
     implicit val shttp = OkHttpFutureBackend()
 
     val nodeUri = NodeURI.parse(uri)
     val keyPath = ChannelCodecs.keyPathCodec.decodeValue(keyPathSerialized.toBitVector).require
-    val shortChannelId = ShortChannelId(shortChannelIdSerialized)
-    val TxCoordinates(_, _, outputIndex) = ShortChannelId.coordinates(shortChannelId)
+    val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)
 
     val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
       user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
@@ -261,12 +260,17 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       port = appKit.nodeParams.config.getInt("bitcoind.rpcport")
     )
 
+    val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
+
     val (fundingTx, finalAddress) = Await.result(for {
-      funding <- new ExtendedBitcoinClient(bitcoinRpcClient).getTransaction(fundingTxId.toHex)
+      blockHash <- bitcoinClient.getBlockHash(fundingHeight)
+      block <- bitcoinClient.getBlock(blockHash)
+      funding = block.tx(fundingIndex)
       address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
-    } yield (funding, address), 30 seconds)
+    } yield (funding, address), 60 seconds)
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
+    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, outputIndex)
 
     val inputInfo = Transactions.InputInfo(
       outPoint = OutPoint(fundingTx.hash, outputIndex),
@@ -274,6 +278,7 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       redeemScript = ByteVector.empty
     )
 
+    logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalAddress=$finalAddress remotePeer=$uri")
     val commitments = makeDummyCommitment(keyPath, nodeUri.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey)
     appKit.switchboard ? Peer.Connect(nodeUri, Set(commitments))
 

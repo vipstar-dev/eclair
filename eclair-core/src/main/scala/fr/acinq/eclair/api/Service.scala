@@ -275,8 +275,8 @@ trait Service extends ExtraDirectives with Logging {
                         }
                       } ~
                       path("recovery") {
-                        formFields("keyPath".as[ByteVector], "fundingTxId".as[ByteVector32](sha256HashUnmarshaller), channelIdFormParam, shortChannelIdFormParam, "uri".as[String]) { (keyPath, fundingTxId, channelId, shortChannelId, uri) =>
-                          complete(eclairApi.attemptChannelRecovery(keyPath, fundingTxId, channelId, shortChannelId.toString, uri))
+                        formFields("keyPath".as[ByteVector], shortChannelIdFormParam, "uri".as[String]) { (keyPath, shortChannelId, uri) =>
+                          complete(eclairApi.attemptChannelRecovery(keyPath, shortChannelId, uri))
                         }
                       }
                   } ~ get {
