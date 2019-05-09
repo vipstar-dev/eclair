@@ -23,15 +23,13 @@ import akka.actor.{Actor, ActorSystem, Props}
 import akka.http.scaladsl.model.HttpMethods.POST
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.CacheDirectives.{`max-age`, `no-store`, public}
-import akka.http.scaladsl.model.headers.{`Access-Control-Allow-Headers`, `Access-Control-Allow-Methods`, `Cache-Control`}
+import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.server.directives.Credentials
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.Timeout
-import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.api.FormParamExtractors._
 import fr.acinq.eclair.api.JsonSupport.CustomTypeHints
 import fr.acinq.eclair.io.NodeURI
@@ -82,6 +80,7 @@ trait Service extends ExtraDirectives with Logging {
 
   val customHeaders = `Access-Control-Allow-Headers`("Content-Type, Authorization") ::
     `Access-Control-Allow-Methods`(POST) ::
+    `Access-Control-Allow-Origin`(HttpOrigin("http://localhost")) ::
     `Cache-Control`(public, `no-store`, `max-age`(0)) :: Nil
 
   lazy val makeSocketHandler: Flow[Message, TextMessage.Strict, NotUsed] = {
