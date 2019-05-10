@@ -269,7 +269,7 @@ trait Service extends ExtraDirectives with Logging {
                       path("channelstats") {
                         complete(eclairApi.channelStats())
                       } ~
-                      path("getBackup") {
+                      path("backup") {
                         withChannelIdentifier { channelIdentifier =>
                           complete(eclairApi.getChannelBackup(channelIdentifier))
                         }
