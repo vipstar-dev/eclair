@@ -21,7 +21,7 @@ import akka.actor.Status.Failure
 import akka.pattern.pipe
 import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.ConfigFactory
-import fr.acinq.bitcoin.Transaction
+import fr.acinq.bitcoin.{Block, ByteVector32, Transaction}
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import grizzled.slf4j.Logging
 import org.json4s.JsonAST._
@@ -119,5 +119,21 @@ class ExtendedBitcoinClientSpec extends TestKit(ActorSystem("test")) with Bitcoi
     // this one should be rejected
     client.publishTransaction(Transaction.read("02000000000101b9e2a3f518fd74e696d258fed3c78c43f84504e76c99212e01cf225083619acf00000000000d0199800136b34b00000000001600145464ce1e5967773922506e285780339d72423244040047304402206795df1fd93c285d9028c384aacf28b43679f1c3f40215fd7bd1abbfb816ee5a022047a25b8c128e692d4717b6dd7b805aa24ecbbd20cfd664ab37a5096577d4a15d014730440220770f44121ed0e71ec4b482dded976f2febd7500dfd084108e07f3ce1e85ec7f5022025b32dc0d551c47136ce41bfb80f5a10de95c0babb22a3ae2d38e6688b32fcb20147522102c2662ab3e4fa18a141d3be3317c6ee134aff10e6cd0a91282a25bf75c0481ebc2102e952dd98d79aa796289fa438e4fdeb06ed8589ff2a0f032b0cfcb4d7b564bc3252aea58d1120")).pipeTo(sender.ref)
     sender.expectMsgType[Failure]
+
+    // get the height of the last block (tip)
+    bitcoinClient.invoke("getblockchaininfo").pipeTo(sender.ref)
+    val tipHeight = sender.expectMsgType[JValue] \ "blocks" match {
+      case JInt(num) => num.toInt
+      case _ => fail()
+    }
+
+    // ask for block last block, by height
+    client.getBlockHash(tipHeight).pipeTo(sender.ref)
+    val blockHash = sender.expectMsgType[ByteVector32]
+
+    // ask for block by hash
+    client.getBlock(blockHash).pipeTo(sender.ref)
+    val tip = sender.expectMsgType[Block]
+    assert(tip.blockId == blockHash)
   }
 }
