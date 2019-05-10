@@ -105,8 +105,6 @@ trait Eclair {
   def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector]
 
   def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit]
-
-  def doRecovery(keyPath: KeyPath, node:NodeURI, shortChannelId: ShortChannelId):Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair with Logging {
@@ -247,55 +245,10 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
   }
 
   override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit] = {
-
-    implicit val shttp = OkHttpFutureBackend()
-
     val nodeUri = NodeURI.parse(uri)
     val keyPath = ChannelCodecs.keyPathCodec.decodeValue(keyPathSerialized.toBitVector).require
 
-    doRecovery(keyPath, nodeUri, shortChannelId)
-  }
-
-  override def doRecovery(keyPath: KeyPath, node:NodeURI, shortChannelId: ShortChannelId):Future[Unit] = {
-    implicit val timeout = Timeout(10 minutes)
-    implicit val shttp = OkHttpFutureBackend()
-
-    val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)
-
-    val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
-      user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
-      password = appKit.nodeParams.config.getString("bitcoind.rpcpassword"),
-      host = appKit.nodeParams.config.getString("bitcoind.host"),
-      port = appKit.nodeParams.config.getInt("bitcoind.rpcport")
-    )
-
-    val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
-
-    val (fundingTx, finalAddress, isFundingAlreadySpent) = Await.result(for {
-      blockHash <- bitcoinClient.getBlockHash(fundingHeight)
-      block <- bitcoinClient.getBlock(blockHash)
-      funding = block.tx(fundingIndex)
-      isSpent <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, outputIndex, includeMempool = true)
-      address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
-    } yield (funding, address, isSpent), 60 seconds)
-
-    if(isFundingAlreadySpent){
-      logger.info(s"Sorry but the funding tx has been spent, so channel has been closed")
-      return Future.successful(())
-    }
-
-    val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
-    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, outputIndex)
-
-    val inputInfo = Transactions.InputInfo(
-      outPoint = OutPoint(fundingTx.hash, outputIndex),
-      txOut = fundingTx.txOut(outputIndex),
-      redeemScript = ByteVector.empty
-    )
-
-    logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalScriptPubKey=$finalAddress remotePeer=$node")
-    val commitments = makeDummyCommitment(keyPath, node.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey)
-    (appKit.switchboard ? Peer.Connect(node, Set(commitments))).mapTo[Unit]
+    RecoveryTool.doRecovery(appKit, keyPath, nodeUri, shortChannelId)
   }
 
   /**
@@ -316,108 +269,6 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       chainHash = appKit.nodeParams.chainHash,
       blockHeight = Globals.blockCount.intValue(),
       publicAddresses = appKit.nodeParams.publicAddresses)
-  )
-
-  def makeDummyCommitment(channelKeyPath: KeyPath, remoteNodeId: PublicKey, channelId: ByteVector32, shortChannelId: ShortChannelId, commitInput: InputInfo, finalScriptPubkey: ByteVector) = DATA_NORMAL(
-    commitments = Commitments(
-      localParams = LocalParams(
-        nodeId = appKit.nodeParams.nodeId,
-        channelKeyPath = channelKeyPath,
-        dustLimitSatoshis = 0,
-        maxHtlcValueInFlightMsat = UInt64(0),
-        channelReserveSatoshis = 0,
-        toSelfDelay = 0,
-        htlcMinimumMsat = 0,
-        maxAcceptedHtlcs = 0,
-        isFunder = true,
-        defaultFinalScriptPubKey = finalScriptPubkey,
-        globalFeatures = hex"00",
-        localFeatures = hex"00"
-      ),
-      remoteParams = RemoteParams(
-        remoteNodeId,
-        dustLimitSatoshis = 0,
-        maxHtlcValueInFlightMsat = UInt64(0),
-        channelReserveSatoshis = 0,
-        htlcMinimumMsat = 0,
-        toSelfDelay = 0,
-        maxAcceptedHtlcs = 0,
-        fundingPubKey = PublicKey(hex"02184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3"),
-        revocationBasepoint = Point(hex"020beeba2c3015509a16558c35b930bed0763465cf7a9a9bc4555fd384d8d383f6"),
-        paymentBasepoint = Point(hex"02e63d3b87e5269d96f1935563ca7c197609a35a928528484da1464eee117335c5"),
-        delayedPaymentBasepoint = Point(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281"),
-        htlcBasepoint = Point(hex"0274a89988063045d3589b162ac6eea5fa0343bf34220648e92a636b1c2468a434"),
-        globalFeatures = hex"00",
-        localFeatures = hex"00"
-      ),
-      channelFlags = 1.toByte,
-      localCommit = LocalCommit(
-        1,
-        spec = CommitmentSpec(
-          htlcs = Set(),
-          feeratePerKw = 234,
-          toLocalMsat = 0,
-          toRemoteMsat = 0
-        ),
-        publishableTxs = PublishableTxs(
-          CommitTx(
-            input = Transactions.InputInfo(
-              outPoint = OutPoint(ByteVector32.Zeroes, 0),
-              txOut = TxOut(Satoshi(0), ByteVector.empty),
-              redeemScript = ByteVector.empty
-            ),
-            tx = Transaction.read("0200000000010163c75c555d712a81998ddbaf9ce1d55b153fc7cb71441ae1782143bb6b04b95d0000000000a325818002bc893c0000000000220020ae8d04088ff67f3a0a9106adb84beb7530097b262ff91f8a9a79b7851b50857f00127a0000000000160014be0f04e9ed31b6ece46ca8c17e1ed233c71da0e9040047304402203b280f9655f132f4baa441261b1b590bec3a6fcd6d7180c929fa287f95d200f80220100d826d56362c65d09b8687ca470a31c1e2bb3ad9a41321ceba355d60b77b79014730440220539e34ab02cced861f9c39f9d14ece41f1ed6aed12443a9a4a88eb2792356be6022023dc4f18730a6471bdf9b640dfb831744b81249ffc50bd5a756ae85d8c6749c20147522102184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3210367d50e7eab4a0ab0c6b92aa2dcf6cc55a02c3db157866b27a723b8ec47e1338152ae74f15a20")
-          ),
-          htlcTxsAndSigs = List.empty
-        )
-      ),
-      remoteCommit = RemoteCommit(
-        666,
-        spec = CommitmentSpec(
-          htlcs = Set(),
-          feeratePerKw = 432,
-          toLocalMsat = 0,
-          toRemoteMsat = 0
-        ),
-        txid = ByteVector32.fromValidHex("b70c3314af259029e7d11191ca0fe6ee407352dfaba59144df7f7ce5cc1c7b51"),
-        remotePerCommitmentPoint = Point(hex"0286f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")
-      ),
-      localChanges = LocalChanges(
-        proposed = List.empty,
-        signed = List.empty,
-        acked = List.empty
-      ),
-      remoteChanges = RemoteChanges(
-        proposed = List.empty,
-        signed = List.empty,
-        acked = List.empty
-      ),
-      localNextHtlcId = 0,
-      remoteNextHtlcId = 0,
-      originChannels = Map(),
-      remoteNextCommitInfo = Right(Point(hex"0386f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")),
-      commitInput = commitInput,
-      remotePerCommitmentSecrets = ShaChain.init,
-      channelId = channelId
-    ),
-    shortChannelId = shortChannelId,
-    buried = true,
-    channelAnnouncement = None,
-    channelUpdate = ChannelUpdate(
-      signature = ByteVector.empty,
-      chainHash = appKit.nodeParams.chainHash,
-      shortChannelId = shortChannelId,
-      timestamp = Platform.currentTime.milliseconds.toSeconds,
-      messageFlags = 0.toByte,
-      channelFlags = 0.toByte,
-      cltvExpiryDelta = 144,
-      htlcMinimumMsat = 0,
-      feeBaseMsat = 0,
-      feeProportionalMillionths = 0,
-      htlcMaximumMsat = None
-    ),
-    localShutdown = None,
-    remoteShutdown = None
   )
 
 }
