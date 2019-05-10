@@ -39,7 +39,13 @@ object Boot extends App with Logging {
     val setup = new Setup(datadir)
     plugins.foreach(_.onSetup(setup))
     setup.bootstrap onComplete {
-      case Success(kit) => plugins.foreach(_.onKit(kit))
+      case Success(kit) =>
+        if(kit.nodeParams.config.getBoolean("recoveryMode")){
+          RecoveryTool.interactiveRecovery(kit)
+//          System.exit(0)
+        }
+
+        plugins.foreach(_.onKit(kit))
       case Failure(t) => onError(t)
     }
   } catch {

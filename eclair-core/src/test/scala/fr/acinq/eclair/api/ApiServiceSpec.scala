@@ -34,6 +34,7 @@ import fr.acinq.eclair._
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.db.{IncomingPayment, NetworkFee, OutgoingPayment, Stats}
+import fr.acinq.eclair.io.NodeURI
 import fr.acinq.eclair.io.Peer.PeerInfo
 import fr.acinq.eclair.payment.PaymentLifecycle.PaymentFailed
 import fr.acinq.eclair.payment._
@@ -103,7 +104,9 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest {
 
     override def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector] = ???
 
-    override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): String = ???
+    override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit] = ???
+
+    override def doRecovery(keyPath: KeyPath, node: NodeURI, shortChannelId: ShortChannelId): Future[Unit] = ???
   }
 
   implicit val formats = JsonSupport.formats

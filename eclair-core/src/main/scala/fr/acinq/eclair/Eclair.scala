@@ -104,8 +104,9 @@ trait Eclair {
 
   def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector]
 
-  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): String
+  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit]
 
+  def doRecovery(keyPath: KeyPath, node:NodeURI, shortChannelId: ShortChannelId):Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair with Logging {
@@ -245,12 +246,20 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
     }
   }
 
-  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): String = {
+  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit] = {
 
     implicit val shttp = OkHttpFutureBackend()
 
     val nodeUri = NodeURI.parse(uri)
     val keyPath = ChannelCodecs.keyPathCodec.decodeValue(keyPathSerialized.toBitVector).require
+
+    doRecovery(keyPath, nodeUri, shortChannelId)
+  }
+
+  override def doRecovery(keyPath: KeyPath, node:NodeURI, shortChannelId: ShortChannelId):Future[Unit] = {
+    implicit val timeout = Timeout(10 minutes)
+    implicit val shttp = OkHttpFutureBackend()
+
     val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)
 
     val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
@@ -262,12 +271,18 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
 
     val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
 
-    val (fundingTx, finalAddress) = Await.result(for {
+    val (fundingTx, finalAddress, isFundingAlreadySpent) = Await.result(for {
       blockHash <- bitcoinClient.getBlockHash(fundingHeight)
       block <- bitcoinClient.getBlock(blockHash)
       funding = block.tx(fundingIndex)
+      isSpent <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, outputIndex, includeMempool = true)
       address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
-    } yield (funding, address), 60 seconds)
+    } yield (funding, address, isSpent), 60 seconds)
+
+    if(isFundingAlreadySpent){
+      logger.info(s"Sorry but the funding tx has been spent, so channel has been closed")
+      return Future.successful(())
+    }
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
     val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, outputIndex)
@@ -278,11 +293,9 @@ class EclairImpl(appKit: Kit) extends Eclair with Logging {
       redeemScript = ByteVector.empty
     )
 
-    logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalAddress=$finalAddress remotePeer=$uri")
-    val commitments = makeDummyCommitment(keyPath, nodeUri.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey)
-    appKit.switchboard ? Peer.Connect(nodeUri, Set(commitments))
-
-    "in progress"
+    logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalScriptPubKey=$finalAddress remotePeer=$node")
+    val commitments = makeDummyCommitment(keyPath, node.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey)
+    (appKit.switchboard ? Peer.Connect(node, Set(commitments))).mapTo[Unit]
   }
 
   /**
