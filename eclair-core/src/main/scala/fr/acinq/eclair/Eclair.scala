@@ -107,7 +107,7 @@ trait Eclair {
   def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit]
 }
 
-class EclairImpl(appKit: Kit) extends Eclair with Logging {
+class EclairImpl(appKit: Kit) extends Eclair {
 
   implicit val ec = appKit.system.dispatcher
 
