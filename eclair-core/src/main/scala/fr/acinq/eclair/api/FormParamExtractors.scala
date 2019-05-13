@@ -59,8 +59,4 @@ object FormParamExtractors {
     Timeout(str.toInt.seconds)
   }
 
-  implicit val channelDataUnmarshaller: Unmarshaller[String, RES_GETINFO] = Unmarshaller.strict { str =>
-    serialization.read[RES_GETINFO](str)
-  }
-
 }
