@@ -17,7 +17,6 @@ import fr.acinq.eclair.wire.ChannelUpdate
 import scodec.bits.ByteVector
 import akka.pattern._
 import grizzled.slf4j.Logging
-
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
