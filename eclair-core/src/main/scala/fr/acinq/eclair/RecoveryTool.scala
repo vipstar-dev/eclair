@@ -8,7 +8,7 @@ import fr.acinq.bitcoin.{ByteVector32, OutPoint, Satoshi, Script, Transaction, T
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.channel._
-import fr.acinq.eclair.crypto.ShaChain
+import fr.acinq.eclair.crypto.{KeyManager, LocalKeyManager, ShaChain}
 import fr.acinq.eclair.io.{NodeURI, Peer}
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
@@ -21,7 +21,7 @@ import grizzled.slf4j.Logging
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
 
 object RecoveryTool extends Logging {
@@ -93,7 +93,7 @@ object RecoveryTool extends Logging {
     )
 
     logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalScriptPubKey=$finalAddress remotePeer=$node")
-    val commitments = makeDummyCommitment(keyPath, node.nodeId, appKit.nodeParams.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
+    val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, keyPath, node.nodeId, appKit.nodeParams.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
     (appKit.switchboard ? Peer.Connect(node, Set(commitments))).mapTo[Unit]
   }
 
@@ -101,6 +101,7 @@ object RecoveryTool extends Logging {
     * This creates the necessary data to simulate a channel in state NORMAL, it contains dummy "points" and "indexes", as well as a dummy channel_update.
     */
   def makeDummyCommitment(
+                           keyManager: KeyManager,
                            channelKeyPath: KeyPath,
                            remoteNodeId: PublicKey,
                            localNodeId: PublicKey,
@@ -133,11 +134,11 @@ object RecoveryTool extends Logging {
         htlcMinimumMsat = 0,
         toSelfDelay = 0,
         maxAcceptedHtlcs = 0,
-        fundingPubKey = PublicKey(hex"02184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3"),
-        revocationBasepoint = Point(hex"020beeba2c3015509a16558c35b930bed0763465cf7a9a9bc4555fd384d8d383f6"),
-        paymentBasepoint = Point(hex"02e63d3b87e5269d96f1935563ca7c197609a35a928528484da1464eee117335c5"),
-        delayedPaymentBasepoint = Point(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281"),
-        htlcBasepoint = Point(hex"0274a89988063045d3589b162ac6eea5fa0343bf34220648e92a636b1c2468a434"),
+        fundingPubKey = keyManager.fundingPublicKey(randomKeyPath).publicKey,
+        revocationBasepoint = randomPoint(chainHash),
+        paymentBasepoint = randomPoint(chainHash),
+        delayedPaymentBasepoint = randomPoint(chainHash),
+        htlcBasepoint = randomPoint(chainHash),
         globalFeatures = hex"00",
         localFeatures = hex"00"
       ),
@@ -163,15 +164,15 @@ object RecoveryTool extends Logging {
         )
       ),
       remoteCommit = RemoteCommit(
-        666,
+        1,
         spec = CommitmentSpec(
           htlcs = Set(),
           feeratePerKw = 432,
           toLocalMsat = 0,
           toRemoteMsat = 0
         ),
-        txid = ByteVector32.fromValidHex("b70c3314af259029e7d11191ca0fe6ee407352dfaba59144df7f7ce5cc1c7b51"),
-        remotePerCommitmentPoint = Point(hex"0286f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")
+        txid = ByteVector32.Zeroes,
+        remotePerCommitmentPoint = randomPoint(chainHash)
       ),
       localChanges = LocalChanges(
         proposed = List.empty,
@@ -186,7 +187,7 @@ object RecoveryTool extends Logging {
       localNextHtlcId = 0,
       remoteNextHtlcId = 0,
       originChannels = Map(),
-      remoteNextCommitInfo = Right(Point(hex"0386f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")),
+      remoteNextCommitInfo = Right(randomPoint(chainHash)),
       commitInput = commitInput,
       remotePerCommitmentSecrets = ShaChain.init,
       channelId = channelId
@@ -210,5 +211,18 @@ object RecoveryTool extends Logging {
     localShutdown = None,
     remoteShutdown = None
   )
+
+  private def randomPoint(chainHash: ByteVector32) = {
+    val keyManager = new LocalKeyManager(seed = randomBytes(32), chainHash)
+    val keyPath = randomKeyPath()
+    keyManager.commitmentPoint(keyPath, Random.nextLong().abs)
+  }
+
+  private def randomKeyPath() = KeyPath(Seq(
+    Random.nextLong().abs,
+    Random.nextLong().abs,
+    Random.nextLong().abs,
+    Random.nextLong().abs
+  ))
 
 }
