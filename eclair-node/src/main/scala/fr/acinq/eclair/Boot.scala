@@ -42,7 +42,6 @@ object Boot extends App with Logging {
       case Success(kit) =>
         if(kit.nodeParams.config.getBoolean("recoveryMode")){
           RecoveryTool.interactiveRecovery(kit)
-//          System.exit(0)
         }
 
         plugins.foreach(_.onKit(kit))

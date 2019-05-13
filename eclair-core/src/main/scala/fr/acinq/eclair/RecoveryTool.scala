@@ -33,7 +33,7 @@ object RecoveryTool extends Logging {
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
 
     val nodeUri = getInput[NodeURI]("Please insert the URI of the target node: ", s => NodeURI.parse(s))
-    val keyPath = getInput[KeyPath]("Please insert the KeyPath (response from /backup API): ", raw => {
+    val keyPath = getInput[KeyPath]("Please insert the channel backup (response from /backup API): ", raw => {
       keyPathCodec.decodeValue(ByteVector.fromValidHex(raw).toBitVector).require
     })
     val shortChannelId = getInput[ShortChannelId]("Please insert the short channel id: ", s => ShortChannelId(s))
