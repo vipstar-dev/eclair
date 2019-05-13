@@ -37,8 +37,11 @@ import fr.acinq.eclair._
 import org.scalatest.Outcome
 import scodec.bits.ByteVector
 import scodec.bits._
+
 import scala.concurrent.duration._
 import TestConstants._
+
+import scala.compat.Platform
 
 /**
   * Created by PM on 05/07/2016.
@@ -305,103 +308,21 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     val effectiveLastCommitmentIndex = 3
     assert(bob.stateData.asInstanceOf[DATA_NORMAL].commitments.localCommit.index == effectiveLastCommitmentIndex)
 
-    val mockAliceIndex = 1 // alice will claim to be at this index when reestablishing the channel - IT MUST BE STRICTLY SMALLER THAN THE ACTUAL INDEX
-    val mockBobIndex = 123 // alice will claim that BOB is at this index when reestablishing the channel
-
     // the mock state contain "random" data that is not really associated with the channel
     // most importantly this data is made in such a way that it will trigger a channel failure from the remote
-    val mockAliceState = DATA_NORMAL(
-      commitments = Commitments(
-        localParams = oldAliceState.commitments.localParams, // during the actual recovery flow this can be reconstructed with seed + channelKeyPath
-        remoteParams = RemoteParams(
-          Bob.nodeParams.nodeId,
-          dustLimitSatoshis = 0,
-          maxHtlcValueInFlightMsat = UInt64(0),
-          channelReserveSatoshis = 0,
-          htlcMinimumMsat = 0,
-          toSelfDelay = 0,
-          maxAcceptedHtlcs = 0,
-          fundingPubKey = PublicKey(hex"02184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3"),
-          revocationBasepoint = Point(hex"020beeba2c3015509a16558c35b930bed0763465cf7a9a9bc4555fd384d8d383f6"),
-          paymentBasepoint = Point(hex"02e63d3b87e5269d96f1935563ca7c197609a35a928528484da1464eee117335c5"),
-          delayedPaymentBasepoint = Point(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281"),
-          htlcBasepoint = Point(hex"0274a89988063045d3589b162ac6eea5fa0343bf34220648e92a636b1c2468a434"),
-          globalFeatures = hex"00",
-          localFeatures = hex"00"
-        ),
-        channelFlags = 1.toByte,
-        localCommit = LocalCommit(
-          mockAliceIndex,
-          spec = CommitmentSpec(
-            htlcs = Set(),
-            feeratePerKw = 234,
-            toLocalMsat = 0,
-            toRemoteMsat = 0
-          ),
-          publishableTxs = PublishableTxs(
-            CommitTx(
-              input = Transactions.InputInfo(
-                outPoint = OutPoint(ByteVector32.Zeroes, 0),
-                txOut = TxOut(Satoshi(0), ByteVector.empty),
-                redeemScript = ByteVector.empty
-              ),
-              tx = Transaction.read("0200000000010163c75c555d712a81998ddbaf9ce1d55b153fc7cb71441ae1782143bb6b04b95d0000000000a325818002bc893c0000000000220020ae8d04088ff67f3a0a9106adb84beb7530097b262ff91f8a9a79b7851b50857f00127a0000000000160014be0f04e9ed31b6ece46ca8c17e1ed233c71da0e9040047304402203b280f9655f132f4baa441261b1b590bec3a6fcd6d7180c929fa287f95d200f80220100d826d56362c65d09b8687ca470a31c1e2bb3ad9a41321ceba355d60b77b79014730440220539e34ab02cced861f9c39f9d14ece41f1ed6aed12443a9a4a88eb2792356be6022023dc4f18730a6471bdf9b640dfb831744b81249ffc50bd5a756ae85d8c6749c20147522102184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3210367d50e7eab4a0ab0c6b92aa2dcf6cc55a02c3db157866b27a723b8ec47e1338152ae74f15a20")
-            ),
-            htlcTxsAndSigs = List.empty
-          )
-        ),
-        remoteCommit = RemoteCommit(
-          mockBobIndex,
-          spec = CommitmentSpec(
-            htlcs = Set(),
-            feeratePerKw = 432,
-            toLocalMsat = 0,
-            toRemoteMsat = 0
-          ),
-          txid = ByteVector32.fromValidHex("b70c3314af259029e7d11191ca0fe6ee407352dfaba59144df7f7ce5cc1c7b51"),
-          remotePerCommitmentPoint = Point(hex"0286f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")
-        ),
-        localChanges = LocalChanges(
-          proposed = List.empty,
-          signed = List.empty,
-          acked = List.empty
-        ),
-        remoteChanges = RemoteChanges(
-          proposed = List.empty,
-          signed = List.empty,
-          acked = List.empty
-        ),
-        localNextHtlcId = 0,
-        remoteNextHtlcId = 0,
-        originChannels = Map(),
-        remoteNextCommitInfo = Right(Point(hex"0386f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")),
-        commitInput = Transactions.InputInfo(
-          outPoint = OutPoint(ByteVector32.Zeroes, 0),
-          txOut = TxOut(Satoshi(0), ByteVector.empty),
-          redeemScript = ByteVector.empty
-        ),
-        remotePerCommitmentSecrets = ShaChain.init,
-        channelId = oldAliceState.commitments.channelId
-      ),
+    val mockAliceState = RecoveryTool.makeDummyCommitment(
+      channelKeyPath = oldAliceState.commitments.localParams.channelKeyPath,
+      remoteNodeId = Bob.nodeParams.nodeId,
+      localNodeId = Alice.nodeParams.nodeId,
+      channelId = oldAliceState.commitments.channelId,
       shortChannelId = oldAliceState.shortChannelId,
-      buried = oldAliceState.buried,
-      channelAnnouncement = None,
-      channelUpdate = ChannelUpdate(
-        signature = ByteVector.empty,
-        chainHash = Alice.nodeParams.chainHash,
-        shortChannelId = oldAliceState.shortChannelId,
-        timestamp = 1556526043L,
-        messageFlags = 0.toByte,
-        channelFlags = 0.toByte,
-        cltvExpiryDelta = 144,
-        htlcMinimumMsat = 0,
-        feeBaseMsat = 0,
-        feeProportionalMillionths = 0,
-        htlcMaximumMsat = None
-      ),
-      localShutdown = None,
-      remoteShutdown = None
+      commitInput = oldAliceState.commitments.commitInput,
+      finalScriptPubkey = oldAliceState.commitments.localParams.defaultFinalScriptPubKey,
+      chainHash = Alice.nodeParams.chainHash
     )
+
+    val mockAliceIndex = mockAliceState.commitments.localCommit.index // alice will claim to be at this index when reestablishing the channel
+    val mockBobIndex = mockAliceState.commitments.remoteCommit.index  // alice will claim that BOB is at this index when reestablishing the channel
 
     // we simulate a disconnection
     sender.send(alice, INPUT_DISCONNECTED)
@@ -415,6 +336,9 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     // then we reconnect them
     sender.send(alice, INPUT_RECONNECTED(alice2bob.ref, aliceInit, bobInit))
     sender.send(bob, INPUT_RECONNECTED(bob2alice.ref, bobInit, aliceInit))
+
+    // upon reconnection alice immediately send to bob an update
+    alice2bob.expectMsgType[ChannelUpdate]
 
     // peers exchange channel_reestablish messages
     val bobCommitments = bob.stateData.asInstanceOf[HasCommitments].commitments
