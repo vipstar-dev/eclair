@@ -21,9 +21,11 @@ For the recovery to work the remote peer must be online, reachable and cooperati
 
 - Bitcoin core up and running with the backup.
 - Seed.dat and channel backup available.
-- Knowledge of the channel short-id, or transactionId of the funding.
+- Knowledge of the channel short-id, or *id* of the funding transaction.
 - Remote node is online and reachable.
 - Remote node supports `option_data_loss_protect`
+
+Note: with the id of the funding transaction is also possible to calculate the short-id.
 
 ### How to obtain a channel backup
 
