@@ -147,7 +147,7 @@ object RecoveryTool extends Logging {
         1,
         spec = CommitmentSpec(
           htlcs = Set(),
-          feeratePerKw = 234,
+          feeratePerKw = Globals.feeratesPerKw.get().blocks_6,
           toLocalMsat = 0,
           toRemoteMsat = 0
         ),
@@ -167,7 +167,7 @@ object RecoveryTool extends Logging {
         1,
         spec = CommitmentSpec(
           htlcs = Set(),
-          feeratePerKw = 432,
+          feeratePerKw = Globals.feeratesPerKw.get().blocks_6,
           toLocalMsat = 0,
           toRemoteMsat = 0
         ),
