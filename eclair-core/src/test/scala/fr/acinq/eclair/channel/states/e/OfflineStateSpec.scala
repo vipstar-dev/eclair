@@ -292,20 +292,8 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     alice2bob.expectMsgType[RevokeAndAck]
     alice2bob.forward(bob)
 
-    addHtlc(210000000, alice, bob, alice2bob, bob2alice)
-    sender.send(alice, CMD_SIGN)
-    sender.expectMsg("ok")
-    alice2bob.expectMsgType[CommitSig]
-    alice2bob.forward(bob)
-    bob2alice.expectMsgType[RevokeAndAck]
-    bob2alice.forward(alice)
-    bob2alice.expectMsgType[CommitSig]
-    bob2alice.forward(alice)
-    alice2bob.expectMsgType[RevokeAndAck]
-    alice2bob.forward(bob)
-
-    // there have been 3 fully ack'ed and revoked commitments
-    val effectiveLastCommitmentIndex = 3
+    // there have been 2 fully ack'ed and revoked commitments
+    val effectiveLastCommitmentIndex = 2
     assert(bob.stateData.asInstanceOf[DATA_NORMAL].commitments.localCommit.index == effectiveLastCommitmentIndex)
 
     // the mock state contain "random" data that is not really associated with the channel
