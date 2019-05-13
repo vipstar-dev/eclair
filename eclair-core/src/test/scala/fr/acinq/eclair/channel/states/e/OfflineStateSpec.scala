@@ -325,6 +325,9 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     val mockAliceIndex = mockAliceState.commitments.localCommit.index // alice will claim to be at this index when reestablishing the channel
     val mockBobIndex = mockAliceState.commitments.remoteCommit.index  // alice will claim that BOB is at this index when reestablishing the channel
 
+    // alice chooses to tell bob that she's behind, using commit index=1
+    assert(mockAliceIndex == 1 && mockBobIndex == 1)
+
     // we simulate a disconnection
     sender.send(alice, INPUT_DISCONNECTED)
     sender.send(bob, INPUT_DISCONNECTED)
