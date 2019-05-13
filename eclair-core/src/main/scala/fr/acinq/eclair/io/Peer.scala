@@ -59,7 +59,7 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
   }
 
   when(DISCONNECTED) {
-    case Event(Peer.Connect(NodeURI(_, hostAndPort), _), d: DisconnectedData) =>
+    case Event(Peer.Connect(NodeURI(_, hostAndPort)), d: DisconnectedData) =>
       val address = new InetSocketAddress(hostAndPort.getHost, hostAndPort.getPort)
       if (d.address_opt.contains(address)) {
         // we already know this address, we'll reconnect automatically
@@ -549,7 +549,7 @@ object Peer {
   case object CONNECTED extends State
 
   case class Init(previousKnownAddress: Option[InetSocketAddress], storedChannels: Set[HasCommitments])
-  case class Connect(uri: NodeURI, withCommitments: Set[HasCommitments] = Set.empty)
+  case class Connect(uri: NodeURI)
   case object Reconnect
   case object Disconnect
   case object ResumeAnnouncements
