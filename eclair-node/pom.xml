@@ -57,7 +57,7 @@
                             <goal>build</goal>
                         </goals>
                         <configuration>
-                            <appClass>fr.acinq.eclair.Boot</appClass>
+                            <appClass>fr.acinq.eclair.ElectrumDebug</appClass>
                             <type>fat</type>
                             <fileName>${project.name}-${project.version}</fileName>
                             <fileDesc>-${git.commit.id.abbrev}</fileDesc>

@@ -69,8 +69,10 @@
         <appender-ref ref="KEYLOG"/>
     </logger>
 
+    <logger name="fr.acinq" level="DEBUG" />
+
     <root level="INFO">
-        <appender-ref ref="ROLLING"/>
+        <appender-ref ref="CONSOLE"/>
     </root>
 
 </configuration>
