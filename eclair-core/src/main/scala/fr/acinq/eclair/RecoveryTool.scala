@@ -144,7 +144,7 @@ object RecoveryTool extends Logging {
       ),
       channelFlags = 1.toByte,
       localCommit = LocalCommit(
-        1,
+        0,
         spec = CommitmentSpec(
           htlcs = Set(),
           feeratePerKw = Globals.feeratesPerKw.get().blocks_6,
@@ -164,7 +164,7 @@ object RecoveryTool extends Logging {
         )
       ),
       remoteCommit = RemoteCommit(
-        1,
+        0,
         spec = CommitmentSpec(
           htlcs = Set(),
           feeratePerKw = Globals.feeratesPerKw.get().blocks_6,

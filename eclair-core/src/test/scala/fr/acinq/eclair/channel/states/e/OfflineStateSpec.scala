@@ -280,20 +280,7 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     alice2bob.expectMsgType[RevokeAndAck]
     alice2bob.forward(bob)
 
-    addHtlc(210000000, alice, bob, alice2bob, bob2alice)
-    sender.send(alice, CMD_SIGN)
-    sender.expectMsg("ok")
-    alice2bob.expectMsgType[CommitSig]
-    alice2bob.forward(bob)
-    bob2alice.expectMsgType[RevokeAndAck]
-    bob2alice.forward(alice)
-    bob2alice.expectMsgType[CommitSig]
-    bob2alice.forward(alice)
-    alice2bob.expectMsgType[RevokeAndAck]
-    alice2bob.forward(bob)
-
-    // there have been 2 fully ack'ed and revoked commitments
-    val effectiveLastCommitmentIndex = 2
+    val effectiveLastCommitmentIndex = 1
     assert(bob.stateData.asInstanceOf[DATA_NORMAL].commitments.localCommit.index == effectiveLastCommitmentIndex)
 
     // the mock state contain "random" data that is not really associated with the channel
@@ -313,8 +300,8 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     val mockAliceIndex = mockAliceState.commitments.localCommit.index // alice will claim to be at this index when reestablishing the channel
     val mockBobIndex = mockAliceState.commitments.remoteCommit.index  // alice will claim that BOB is at this index when reestablishing the channel
 
-    // alice chooses to tell bob that she's behind, using commit index=1
-    assert(mockAliceIndex == 1 && mockBobIndex == 1)
+    // alice chooses to tell bob that she's behind, using commit index=0
+    assert(mockAliceIndex == 0 && mockBobIndex == 0)
 
     // we simulate a disconnection
     sender.send(alice, INPUT_DISCONNECTED)
