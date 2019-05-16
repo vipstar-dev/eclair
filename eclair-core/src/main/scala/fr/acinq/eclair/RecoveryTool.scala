@@ -9,15 +9,13 @@ import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.{KeyManager, LocalKeyManager, ShaChain}
-import fr.acinq.eclair.io.{NodeURI, Peer, ReconnectWithCommitments}
+import fr.acinq.eclair.io.{NodeURI, Peer}
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
 import fr.acinq.eclair.wire.ChannelCodecs._
 import fr.acinq.eclair.wire.{ChannelUpdate, NodeAddress}
 import scodec.bits.ByteVector
-import akka.pattern._
 import grizzled.slf4j.Logging
-
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
