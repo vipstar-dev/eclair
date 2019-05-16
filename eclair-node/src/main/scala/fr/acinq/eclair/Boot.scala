@@ -40,7 +40,7 @@ object Boot extends App with Logging {
     plugins.foreach(_.onSetup(setup))
     setup.bootstrap onComplete {
       case Success(kit) =>
-        if(kit.nodeParams.config.getBoolean("recoveryMode")){
+        if(kit.nodeParams.config.hasPath("recoveryMode") && kit.nodeParams.config.getBoolean("recoveryMode")){
           RecoveryTool.interactiveRecovery(kit)
         }
 
