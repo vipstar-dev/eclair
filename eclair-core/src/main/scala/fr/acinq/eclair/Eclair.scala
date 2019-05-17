@@ -17,38 +17,24 @@
 package fr.acinq.eclair
 
 import java.util.UUID
-
 import akka.actor.{ActorRef, SupervisorStrategy}
 import akka.pattern._
 import akka.util.Timeout
-import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
-import com.typesafe.config.ConfigFactory
-import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
-import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{Block, ByteVector32, MilliSatoshi, OutPoint, Satoshi, Script, Transaction, TxOut}
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
-import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, BatchingBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.channel.Register.{Forward, ForwardShortId}
 import fr.acinq.eclair.channel._
-import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.db.{IncomingPayment, NetworkFee, OutgoingPayment, Stats}
 import fr.acinq.eclair.io.Peer.{GetPeerInfo, Init, PeerInfo}
 import fr.acinq.eclair.io.{Authenticator, NodeURI, Peer, Switchboard}
 import fr.acinq.eclair.payment.PaymentLifecycle._
 import fr.acinq.eclair.router.{ChannelDesc, RouteRequest, RouteResponse}
 import scodec.bits.ByteVector
-import scodec.bits._
-
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import fr.acinq.eclair.payment._
-import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
-import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
+import fr.acinq.eclair.payment.{PaymentReceived, PaymentRelayed, PaymentRequest, PaymentSent}
+import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, NodeAnnouncement}
 import fr.acinq.eclair.wire._
-import grizzled.slf4j.Logging
-
-import scala.compat.Platform
 
 case class GetInfoResponse(nodeId: PublicKey, alias: String, chainHash: ByteVector32, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 
@@ -72,7 +58,7 @@ trait Eclair {
 
   def peersInfo()(implicit timeout: Timeout): Future[Iterable[PeerInfo]]
 
-  def receive(description: String, amountMsat: Option[Long], expire: Option[Long], fallbackAddress: Option[String])(implicit timeout: Timeout): Future[PaymentRequest]
+  def receive(description: String, amountMsat: Option[Long], expire: Option[Long], fallbackAddress: Option[String], paymentPreimage: Option[ByteVector32])(implicit timeout: Timeout): Future[PaymentRequest]
 
   def receivedInfo(paymentHash: ByteVector32)(implicit timeout: Timeout): Future[Option[IncomingPayment]]
 
@@ -170,9 +156,9 @@ class EclairImpl(appKit: Kit) extends Eclair {
     case Some(pk) => (appKit.router ? 'updatesMap).mapTo[Map[ChannelDesc, ChannelUpdate]].map(_.filter(e => e._1.a == pk || e._1.b == pk).values)
   }
 
-  override def receive(description: String, amountMsat: Option[Long], expire: Option[Long], fallbackAddress: Option[String])(implicit timeout: Timeout): Future[PaymentRequest] = {
+  override def receive(description: String, amountMsat: Option[Long], expire: Option[Long], fallbackAddress: Option[String], paymentPreimage: Option[ByteVector32])(implicit timeout: Timeout): Future[PaymentRequest] = {
     fallbackAddress.map { fa => fr.acinq.eclair.addressToPublicKeyScript(fa, appKit.nodeParams.chainHash) } // if it's not a bitcoin address throws an exception
-    (appKit.paymentHandler ? ReceivePayment(description = description, amountMsat_opt = amountMsat.map(MilliSatoshi), expirySeconds_opt = expire, fallbackAddress = fallbackAddress)).mapTo[PaymentRequest]
+    (appKit.paymentHandler ? ReceivePayment(description = description, amountMsat_opt = amountMsat.map(MilliSatoshi), expirySeconds_opt = expire, fallbackAddress = fallbackAddress, paymentPreimage = paymentPreimage)).mapTo[PaymentRequest]
   }
 
   override def findRoute(targetNodeId: PublicKey, amountMsat: Long, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty)(implicit timeout: Timeout): Future[RouteResponse] = {
