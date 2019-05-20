@@ -20,13 +20,11 @@ import scodec.bits.ByteVector
 import akka.pattern._
 import fr.acinq.eclair.api.JsonSupport
 import grizzled.slf4j.Logging
-
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
-
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.Source
 
@@ -44,7 +42,7 @@ object RecoveryTool extends Logging {
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
 
     val nodeUri = getInput[NodeURI]("Please insert the URI of the target node: ", s => NodeURI.parse(s))
-    val backup = getInput[StaticBackup]("Please insert the absolute path of the backup file", path => {
+    val backup = getInput[StaticBackup]("Please insert the absolute path of the backup file: ", path => {
       serialization.read[StaticBackup](Source.fromFile(path).mkString)
     })
 
