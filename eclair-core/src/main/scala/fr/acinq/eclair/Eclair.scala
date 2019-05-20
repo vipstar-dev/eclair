@@ -90,7 +90,7 @@ trait Eclair {
 
   def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector]
 
-  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Unit
+  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair {
@@ -230,7 +230,7 @@ class EclairImpl(appKit: Kit) extends Eclair {
     }
   }
 
-  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Unit = {
+  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit] = {
     val nodeUri = NodeURI.parse(uri)
     val keyPath = ChannelCodecs.keyPathCodec.decodeValue(keyPathSerialized.toBitVector).require
 

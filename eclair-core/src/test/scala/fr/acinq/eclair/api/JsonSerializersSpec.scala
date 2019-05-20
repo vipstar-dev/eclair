@@ -19,7 +19,6 @@ package fr.acinq.eclair.api
 import java.net.InetAddress
 import java.util.UUID
 
-import com.google.common.net.HostAndPort
 import fr.acinq.bitcoin.{MilliSatoshi, OutPoint}
 import fr.acinq.eclair._
 import fr.acinq.eclair.payment.{PaymentRequest, PaymentSettlingOnChain}
@@ -56,15 +55,12 @@ class JsonSerializersSpec extends FunSuite with Matchers {
   }
 
   test("NodeAddress serialization") {
-    val guavaAddress = HostAndPort.fromParts("10.0.0.1", 8888)
     val ipv4 = NodeAddress.fromParts("10.0.0.1", 8888).get
-    val ipv4_fromGuava = NodeAddress.fromHostAndPort(guavaAddress).get
     val ipv6LocalHost = NodeAddress.fromParts(InetAddress.getByAddress(Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)).getHostAddress, 9735).get
     val tor2 = Tor2("aaaqeayeaudaocaj", 7777)
     val tor3 = Tor3("aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dypsaijc", 9999)
 
     Serialization.write(ipv4)(org.json4s.DefaultFormats + new NodeAddressSerializer) shouldBe s""""10.0.0.1:8888""""
-    Serialization.write(ipv4_fromGuava)(org.json4s.DefaultFormats + new NodeAddressSerializer) shouldBe s""""10.0.0.1:8888""""
     Serialization.write(ipv6LocalHost)(org.json4s.DefaultFormats + new NodeAddressSerializer) shouldBe s""""[0:0:0:0:0:0:0:1]:9735""""
     Serialization.write(tor2)(org.json4s.DefaultFormats + new NodeAddressSerializer) shouldBe s""""aaaqeayeaudaocaj.onion:7777""""
     Serialization.write(tor3)(org.json4s.DefaultFormats + new NodeAddressSerializer) shouldBe s""""aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dypsaijc.onion:9999""""

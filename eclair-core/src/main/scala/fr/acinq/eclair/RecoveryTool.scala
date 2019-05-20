@@ -13,7 +13,7 @@ import fr.acinq.eclair.io.{NodeURI, Peer, ReconnectWithCommitments}
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
 import fr.acinq.eclair.wire.ChannelCodecs._
-import fr.acinq.eclair.wire.{ChannelUpdate, NodeAddress}
+import fr.acinq.eclair.wire.ChannelUpdate
 import scodec.bits.ByteVector
 import akka.pattern._
 import grizzled.slf4j.Logging
@@ -54,15 +54,10 @@ object RecoveryTool extends Logging {
     throw new IllegalArgumentException("Unable to get input")
   }
 
-  def doRecovery(appKit: Kit, keyPath: KeyPath, node: NodeURI, shortChannelId: ShortChannelId): Unit = {
+  def doRecovery(appKit: Kit, keyPath: KeyPath, node: NodeURI, shortChannelId: ShortChannelId): Future[Unit] = {
     implicit val timeout = Timeout(10 minutes)
     implicit val ec = appKit.system.dispatcher
     implicit val shttp = OkHttpFutureBackend()
-
-    val nodeAddress = NodeAddress.fromHostAndPort(node.address) match {
-      case Success(address) => address
-      case Failure(thr) => throw thr
-    }
 
     val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)
 
@@ -85,7 +80,7 @@ object RecoveryTool extends Logging {
 
     if (!isFundingSpendable) {
       logger.info(s"Sorry but the funding tx has been spent, the channel has been closed")
-      return
+      return Future.successful(())
     }
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
@@ -99,9 +94,7 @@ object RecoveryTool extends Logging {
 
     logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalScriptPubKey=$finalAddress remotePeer=$node")
     val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, keyPath, node.nodeId, appKit.nodeParams.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
-    appKit.nodeParams.db.channels.addOrUpdateChannel(commitments)
-    appKit.nodeParams.db.peers.addOrUpdatePeer(node.nodeId, nodeAddress)
-    logger.info(s"Database updated, please restart eclair")
+    (appKit.switchboard ? ReconnectWithCommitments(node, commitments)).mapTo[Unit]
   }
 
   /**
@@ -203,7 +196,7 @@ object RecoveryTool extends Logging {
     buried = true,
     channelAnnouncement = None,
     channelUpdate = ChannelUpdate(
-      signature = hex"3045022100e0a180fdd0fe38037cc878c03832861b40a29d32bd7b40b10c9e1efc8c1468a002205ae06d1624896d0d29f4b31e32772ea3cb1b4d7ed4e077e5da28dcc33c0e781201",
+      signature = ByteVector.empty,
       chainHash = chainHash,
       shortChannelId = shortChannelId,
       timestamp = Platform.currentTime.milliseconds.toSeconds,
