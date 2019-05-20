@@ -4,14 +4,14 @@ import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.eclair.TestConstants.Bob
 import fr.acinq.eclair.blockchain.TestWallet
 import fr.acinq.eclair.blockchain.bitcoind.BitcoindService
-import fr.acinq.eclair.io.{NodeURI, Peer}
+import fr.acinq.eclair.io.{NodeURI, Peer, ReconnectWithCommitments}
 import akka.actor.ActorSystem
 import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.ConfigFactory
 import fr.acinq.eclair.blockchain.fee.FeeratesPerKw
 import fr.acinq.eclair.channel.DATA_NORMAL
-import fr.acinq.eclair.wire.NodeAddress
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike}
+
 import scala.collection.JavaConversions._
 
 class RecoveryToolSpec extends TestKit(ActorSystem("test")) with BitcoindService with FunSuiteLike with BeforeAndAfterAll {
@@ -62,20 +62,13 @@ class RecoveryToolSpec extends TestKit(ActorSystem("test")) with BitcoindService
 
     RecoveryTool.doRecovery(kit, keyPath, remoteNodeUri, shortId)
 
-    val channelDb = kit.nodeParams.db.channels
-    val peersDb = kit.nodeParams.db.peers
-
-    val Seq(hasCommitments) = channelDb.listLocalChannels()
-    val stateData = hasCommitments.asInstanceOf[DATA_NORMAL]
-
+    val connect = switchboard.expectMsgType[ReconnectWithCommitments]
+    val stateData = connect.commitments.asInstanceOf[DATA_NORMAL]
+    assert(connect.uri == remoteNodeUri)
+    assert(stateData.shortChannelId == shortId)
     assert(stateData.commitments.localParams.channelKeyPath == keyPath)
     assert(stateData.commitments.localParams.nodeId == nodeParams.nodeId)
-    assert(stateData.commitments.localCommit.index == 0)
-    assert(stateData.commitments.remoteCommit.index == 0)
     assert(stateData.commitments.commitInput.outPoint.index == 0)
-    assert(stateData.shortChannelId == shortId)
-
-    assert(peersDb.listPeers() == Map(Bob.nodeParams.nodeId -> NodeAddress.fromHostAndPort(remoteNodeUri.address).get))
   }
 
 }
