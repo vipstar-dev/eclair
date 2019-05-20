@@ -1,6 +1,7 @@
 package fr.acinq.eclair
 
 import java.io.{File, FileWriter}
+
 import akka.util.Timeout
 import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
@@ -19,12 +20,15 @@ import scodec.bits.ByteVector
 import akka.pattern._
 import fr.acinq.eclair.api.JsonSupport
 import grizzled.slf4j.Logging
+
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
+
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.io.Source
 
 object RecoveryTool extends Logging {
 
@@ -34,16 +38,18 @@ object RecoveryTool extends Logging {
 
   def interactiveRecovery(appKit: Kit): Unit = {
 
+    import JsonSupport.serialization
+    import JsonSupport.formats
+
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
 
     val nodeUri = getInput[NodeURI]("Please insert the URI of the target node: ", s => NodeURI.parse(s))
-    val keyPath = getInput[KeyPath]("Please insert the channel backup (response from /backup API): ", raw => {
-      keyPathCodec.decodeValue(ByteVector.fromValidHex(raw).toBitVector).require
+    val backup = getInput[StaticBackup]("Please insert the absolute path of the backup file", path => {
+      serialization.read[StaticBackup](Source.fromFile(path).mkString)
     })
-    val shortChannelId = getInput[ShortChannelId]("Please insert the short channel id: ", s => ShortChannelId(s))
 
     println(s"### Attempting channel recovery now - good luck! ###")
-    doRecovery(appKit, ???, nodeUri)
+    doRecovery(appKit, backup, nodeUri)
   }
 
   private def getInput[T](msg: String, parse: String => T): T = {
