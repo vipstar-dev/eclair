@@ -1,5 +1,6 @@
 package fr.acinq.eclair
 
+import java.io.{File, FileWriter}
 import akka.util.Timeout
 import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
@@ -16,15 +17,18 @@ import fr.acinq.eclair.wire.ChannelCodecs._
 import fr.acinq.eclair.wire.ChannelUpdate
 import scodec.bits.ByteVector
 import akka.pattern._
+import fr.acinq.eclair.api.JsonSupport
 import grizzled.slf4j.Logging
-
 import concurrent.duration._
 import scala.compat.Platform
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object RecoveryTool extends Logging {
+
+  case class StaticBackup(channelId: ByteVector32, fundingTxId: ByteVector32, fundingOutputIndex: Long, channelKeyPath: KeyPath, remoteNodeId: PublicKey)
 
   private lazy val scanner = new java.util.Scanner(System.in).useDelimiter("\\n")
 
@@ -54,9 +58,35 @@ object RecoveryTool extends Logging {
     throw new IllegalArgumentException("Unable to get input")
   }
 
+  def storeBackup(nodeParams: NodeParams, channelData: DATA_WAIT_FOR_FUNDING_CONFIRMED) = Future {
+
+    import JsonSupport.formats
+    import JsonSupport.serialization
+
+    val backup = StaticBackup(
+      channelId = channelData.channelId,
+      fundingTxId = channelData.commitments.commitInput.outPoint.txid,
+      fundingOutputIndex = channelData.commitments.commitInput.outPoint.index,
+      channelKeyPath = channelData.commitments.localParams.channelKeyPath,
+      remoteNodeId = channelData.commitments.remoteParams.nodeId
+    )
+
+    if(nodeParams.db.dbDir.isEmpty){
+      logger.warn(s"No database folder defined, skipping static backup")
+    }
+
+    nodeParams.db.dbDir.foreach { dbDir =>
+      val channelBackup = new File(dbDir, "backup_"+backup.channelId.toHex+".json")
+      val writer = new FileWriter(channelBackup)
+      writer.write(serialization.writePretty(backup))
+      writer.close()
+      logger.info(s"Created static backup: ${channelBackup.getAbsolutePath}")
+    }
+
+  }
+
   def doRecovery(appKit: Kit, keyPath: KeyPath, node: NodeURI, shortChannelId: ShortChannelId): Future[Unit] = {
     implicit val timeout = Timeout(10 minutes)
-    implicit val ec = appKit.system.dispatcher
     implicit val shttp = OkHttpFutureBackend()
 
     val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)

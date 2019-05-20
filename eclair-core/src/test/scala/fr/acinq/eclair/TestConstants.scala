@@ -46,7 +46,7 @@ object TestConstants {
 
   def sqliteInMemory() = DriverManager.getConnection("jdbc:sqlite::memory:")
 
-  def inMemoryDb(connection: Connection = sqliteInMemory()): Databases = Databases.databaseByConnections(connection, connection, connection)
+  def inMemoryDb(connection: Connection = sqliteInMemory()): Databases = Databases.databaseByConnections(connection, connection, connection, databaseDir = None)
 
 
   object Alice {
