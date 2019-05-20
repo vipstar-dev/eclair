@@ -175,19 +175,18 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
       }
   }
 
-  test("/channel should reply with extensive channel info") {
-    val mockService = new MockService(new EclairMock {
-      override def channelInfo(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[RES_GETINFO] = Future.successful(
-        TestConstants.mockResGetInfo
-      )
-    })
+  test("'channel' should reply with extensive channel info") {
+    val eclair = mock[Eclair]
+    eclair.channelInfo(any[Either[ByteVector32, ShortChannelId]])(any[Timeout]) returns Future.successful(TestConstants.mockResGetInfo)
+    val mockService = new MockService(eclair)
 
-    Post("/channel", FormData("channelId" -> "63c75c555d712a81998ddbaf9ce1d55b153fc7cb71441ae1782143bb6b04b95d")) ~>
+    Post("/channel", FormData("channelId" -> ByteVector32.One.toHex)) ~>
       addCredentials(BasicHttpCredentials("", mockService.password)) ~>
       Route.seal(mockService.route) ~>
       check {
         assert(handled)
         assert(status == OK)
+        eclair.channelInfo(Left(ByteVector32.One))(any[Timeout]).wasCalled(once)
         val resp = entityAs[String]
         matchTestJson("channel", resp)
       }

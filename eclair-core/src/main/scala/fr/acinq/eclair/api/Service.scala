@@ -41,7 +41,6 @@ import fr.acinq.eclair.{Eclair, ShortChannelId}
 import grizzled.slf4j.Logging
 import org.json4s.jackson.Serialization
 import scodec.bits.ByteVector
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
