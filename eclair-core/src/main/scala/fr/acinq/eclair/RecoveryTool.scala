@@ -43,7 +43,7 @@ object RecoveryTool extends Logging {
     val shortChannelId = getInput[ShortChannelId]("Please insert the short channel id: ", s => ShortChannelId(s))
 
     println(s"### Attempting channel recovery now - good luck! ###")
-    doRecovery(appKit, keyPath, nodeUri, shortChannelId)
+    doRecovery(appKit, ???, nodeUri)
   }
 
   private def getInput[T](msg: String, parse: String => T): T = {
@@ -85,11 +85,11 @@ object RecoveryTool extends Logging {
 
   }
 
-  def doRecovery(appKit: Kit, keyPath: KeyPath, node: NodeURI, shortChannelId: ShortChannelId): Future[Unit] = {
+  def doRecovery(appKit: Kit, backup: StaticBackup, uri: NodeURI): Future[Unit] = {
+    require(backup.remoteNodeId == uri.nodeId)
+
     implicit val timeout = Timeout(10 minutes)
     implicit val shttp = OkHttpFutureBackend()
-
-    val TxCoordinates(fundingHeight, fundingIndex, outputIndex) = ShortChannelId.coordinates(shortChannelId)
 
     val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
       user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
@@ -101,10 +101,8 @@ object RecoveryTool extends Logging {
     val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
 
     val (fundingTx, finalAddress, isFundingSpendable) = Await.result(for {
-      blockHash <- bitcoinClient.getBlockHash(fundingHeight)
-      block <- bitcoinClient.getBlock(blockHash)
-      funding = block.tx(fundingIndex)
-      isSpendable <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, outputIndex, includeMempool = true)
+      funding <- bitcoinClient.getTransaction(backup.fundingTxId.toHex)
+      isSpendable <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, backup.fundingOutputIndex.toInt, includeMempool = true)
       address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
     } yield (funding, address, isSpendable), 60 seconds)
 
@@ -114,17 +112,17 @@ object RecoveryTool extends Logging {
     }
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
-    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, outputIndex)
+    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, backup.fundingOutputIndex.toInt)
 
     val inputInfo = Transactions.InputInfo(
-      outPoint = OutPoint(fundingTx.hash, outputIndex),
-      txOut = fundingTx.txOut(outputIndex),
+      outPoint = OutPoint(fundingTx.hash, backup.fundingOutputIndex),
+      txOut = fundingTx.txOut(backup.fundingOutputIndex.toInt),
       redeemScript = ByteVector.empty
     )
 
-    logger.info(s"Recovery using: channelId=$channelId shortChannelId=$shortChannelId finalScriptPubKey=$finalAddress remotePeer=$node")
-    val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, keyPath, node.nodeId, appKit.nodeParams.nodeId, channelId, shortChannelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
-    (appKit.switchboard ? ReconnectWithCommitments(node, commitments)).mapTo[Unit]
+    logger.info(s"Recovery using: channelId=$channelId finalScriptPubKey=$finalAddress remotePeer=${backup.remoteNodeId}")
+    val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, backup.channelKeyPath, backup.remoteNodeId, appKit.nodeParams.nodeId, channelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
+    (appKit.switchboard ? ReconnectWithCommitments(uri, commitments)).mapTo[Unit]
   }
 
   /**
@@ -136,7 +134,6 @@ object RecoveryTool extends Logging {
                            remoteNodeId: PublicKey,
                            localNodeId: PublicKey,
                            channelId: ByteVector32,
-                           shortChannelId: ShortChannelId,
                            commitInput: InputInfo,
                            finalScriptPubkey: ByteVector,
                            chainHash: ByteVector32
@@ -222,13 +219,13 @@ object RecoveryTool extends Logging {
       remotePerCommitmentSecrets = ShaChain.init,
       channelId = channelId
     ),
-    shortChannelId = shortChannelId,
+    shortChannelId = ShortChannelId("123x1x0"),
     buried = true,
     channelAnnouncement = None,
     channelUpdate = ChannelUpdate(
       signature = ByteVector.empty,
       chainHash = chainHash,
-      shortChannelId = shortChannelId,
+      shortChannelId = ShortChannelId("123x1x0"),
       timestamp = Platform.currentTime.milliseconds.toSeconds,
       messageFlags = 0.toByte,
       channelFlags = 0.toByte,

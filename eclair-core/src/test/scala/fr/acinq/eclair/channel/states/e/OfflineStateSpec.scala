@@ -291,7 +291,6 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
       remoteNodeId = Bob.nodeParams.nodeId,
       localNodeId = Alice.nodeParams.nodeId,
       channelId = oldAliceState.commitments.channelId,
-      shortChannelId = oldAliceState.shortChannelId,
       commitInput = oldAliceState.commitments.commitInput,
       finalScriptPubkey = oldAliceState.commitments.localParams.defaultFinalScriptPubKey,
       chainHash = Alice.nodeParams.chainHash

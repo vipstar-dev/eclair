@@ -17,6 +17,7 @@
 package fr.acinq.eclair
 
 import java.util.UUID
+
 import akka.actor.{ActorRef, SupervisorStrategy}
 import akka.pattern._
 import akka.util.Timeout
@@ -34,8 +35,8 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import fr.acinq.eclair.payment.{PaymentReceived, PaymentRelayed, PaymentRequest, PaymentSent}
 import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, NodeAnnouncement}
-import fr.acinq.eclair.wire._
 import TimestampQueryFilters._
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 
 case class GetInfoResponse(nodeId: PublicKey, alias: String, chainHash: ByteVector32, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 
@@ -103,9 +104,9 @@ trait Eclair {
 
   def getInfoResponse()(implicit timeout: Timeout): Future[GetInfoResponse]
 
-  def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector]
+  def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup]
 
-  def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit]
+  def attemptChannelRecovery(backup: StaticBackup, uri: String)(implicit timeout: Timeout): Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair {
@@ -238,18 +239,23 @@ class EclairImpl(appKit: Kit) extends Eclair {
     appKit.nodeParams.db.payments.getPaymentRequest(paymentHash)
   }
 
-  override def getChannelBackup(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ByteVector] = {
+  override def getChannelBackup(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup] = {
     sendToChannel(channelIdentifier, CMD_GETINFO).mapTo[RES_GETINFO].map { info =>
-      val keyPath = info.data.asInstanceOf[DATA_NORMAL].commitments.localParams.channelKeyPath
-      ByteVector(ChannelCodecs.keyPathCodec.encode(keyPath).require.toByteArray)
+      val channelData = info.data.asInstanceOf[DATA_NORMAL]
+      StaticBackup(
+        channelId = channelData.commitments.channelId,
+        fundingTxId = channelData.commitments.commitInput.outPoint.txid,
+        fundingOutputIndex = channelData.commitments.commitInput.outPoint.index,
+        channelKeyPath = channelData.commitments.localParams.channelKeyPath,
+        remoteNodeId = channelData.commitments.remoteParams.nodeId
+      )
     }
   }
 
-  override def attemptChannelRecovery(keyPathSerialized: ByteVector, shortChannelId: ShortChannelId, uri: String)(implicit timeout: Timeout): Future[Unit] = {
+  override def attemptChannelRecovery(backup: StaticBackup, uri: String)(implicit timeout: Timeout): Future[Unit] = {
     val nodeUri = NodeURI.parse(uri)
-    val keyPath = ChannelCodecs.keyPathCodec.decodeValue(keyPathSerialized.toBitVector).require
 
-    RecoveryTool.doRecovery(appKit, keyPath, nodeUri, shortChannelId)
+    RecoveryTool.doRecovery(appKit, backup, nodeUri)
   }
 
   /**

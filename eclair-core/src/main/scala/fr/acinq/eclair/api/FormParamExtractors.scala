@@ -25,7 +25,9 @@ import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.ShortChannelId
 import fr.acinq.eclair.payment.PaymentRequest
+import org.json4s.Formats
 import scodec.bits.ByteVector
+
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
@@ -68,6 +70,11 @@ object FormParamExtractors {
       case Success(list) => list
       case Failure(_) => throw new IllegalArgumentException(s"PublicKey list must be either json-encoded or comma separated list")
     }
+  }
+
+  // this is a special unmarshaller that can delegates the operation to the underlining json deserializer
+  def genericUnmarshaller[T](implicit formats: Formats): Unmarshaller[String, T] = Unmarshaller.strict { str =>
+    JsonSupport.serialization.read(str)
   }
 
 }

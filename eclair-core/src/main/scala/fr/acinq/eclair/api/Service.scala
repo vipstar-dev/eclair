@@ -32,6 +32,7 @@ import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.Timeout
 import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.api.FormParamExtractors._
 import fr.acinq.eclair.api.JsonSupport.CustomTypeHints
 import fr.acinq.eclair.io.NodeURI
@@ -41,6 +42,7 @@ import fr.acinq.eclair.{Eclair, ShortChannelId}
 import grizzled.slf4j.Logging
 import org.json4s.jackson.Serialization
 import scodec.bits.ByteVector
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -279,8 +281,8 @@ trait Service extends ExtraDirectives with Logging {
                         }
                       } ~
                       path("recovery") {
-                        formFields("keyPath".as[ByteVector], shortChannelIdFormParam, "uri".as[String]) { (keyPath, shortChannelId, uri) =>
-                          complete(eclairApi.attemptChannelRecovery(keyPath, shortChannelId, uri))
+                        formFields("backup".as[StaticBackup](genericUnmarshaller[StaticBackup]), "uri".as[String]) { (backup, uri) =>
+                          complete(eclairApi.attemptChannelRecovery(backup, uri))
                         }
                       }
                   } ~ get {
