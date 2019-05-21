@@ -241,7 +241,7 @@ class EclairImpl(appKit: Kit) extends Eclair {
 
   override def getChannelBackup(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup] = {
     sendToChannel(channelIdentifier, CMD_GETINFO).mapTo[RES_GETINFO].map { info =>
-      val channelData = info.data.asInstanceOf[DATA_NORMAL]
+      val channelData = info.data.asInstanceOf[HasCommitments]
       StaticBackup(
         channelId = channelData.commitments.channelId,
         fundingTxId = channelData.commitments.commitInput.outPoint.txid,
