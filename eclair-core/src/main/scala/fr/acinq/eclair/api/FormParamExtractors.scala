@@ -73,8 +73,8 @@ object FormParamExtractors {
   }
 
   // this is a special unmarshaller that can delegates the operation to the underlining json deserializer
-  def genericUnmarshaller[T](implicit formats: Formats): Unmarshaller[String, T] = Unmarshaller.strict { str =>
-    JsonSupport.serialization.read(str)
+  def genericUnmarshaller[T](implicit formats: Formats, mf: Manifest[T]): Unmarshaller[String, T] = Unmarshaller.strict { str =>
+    JsonSupport.serialization.read(str)(formats, mf)
   }
 
 }

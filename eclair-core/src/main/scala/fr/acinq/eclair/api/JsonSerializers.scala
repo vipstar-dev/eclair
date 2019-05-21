@@ -18,11 +18,13 @@ package fr.acinq.eclair.api
 
 import java.net.InetSocketAddress
 import java.util.UUID
+
 import com.google.common.net.HostAndPort
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport.ShouldWritePretty
 import fr.acinq.bitcoin.Crypto.{Point, PrivateKey, PublicKey, Scalar}
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi, OutPoint, Transaction}
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.channel.State
 import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.db.OutgoingPaymentStatus
@@ -171,6 +173,34 @@ class OutgoingPaymentStatusSerializer extends CustomSerializer[OutgoingPaymentSt
   case el: OutgoingPaymentStatus.Value => JString(el.toString)
 }))
 
+class StaticBackupSerializer extends CustomSerializer[StaticBackup](format => ( {
+  case JObject(List(
+  ("channelId", JString(channelId)),
+  ("fundingTxId", JString(fundingTxId)),
+  ("fundingOutputIndex", JInt(fundingOutput)),
+  ("channelKeyPath", JObject(List(
+  ("path", JArray(keyPath))
+  ))),
+  ("remoteNodeId", JString(remoteNodeId))
+  )) => StaticBackup(
+    channelId = ByteVector32.fromValidHex(channelId),
+    fundingTxId = ByteVector32.fromValidHex(fundingTxId),
+    fundingOutputIndex = fundingOutput.longValue(),
+    channelKeyPath = keyPath.asInstanceOf[List[JInt]].map(_.num.longValue()),
+    remoteNodeId = PublicKey(ByteVector.fromValidHex(remoteNodeId))
+  )
+}, {
+  case backup:StaticBackup => JObject(List(
+    ("channelId", JString(backup.channelId.toHex)),
+    ("fundingTxId", JString(backup.fundingTxId.toHex)),
+    ("fundingOutputIndex", JInt(backup.fundingOutputIndex)),
+    ("channelKeyPath", JObject(List(
+      ("path", JArray(backup.channelKeyPath.toList.map(JLong)))
+    ))),
+    ("remoteNodeId", JString(backup.remoteNodeId.toHex))
+  ))
+}))
+
 object JsonSupport extends Json4sSupport {
 
   implicit val serialization = jackson.Serialization
@@ -201,7 +231,8 @@ object JsonSupport extends Json4sSupport {
     new DirectionSerializer +
     new PaymentRequestSerializer +
     new JavaUUIDSerializer +
-    new OutgoingPaymentStatusSerializer
+    new OutgoingPaymentStatusSerializer +
+    new StaticBackupSerializer
 
   implicit val shouldWritePretty: ShouldWritePretty = ShouldWritePretty.True
 

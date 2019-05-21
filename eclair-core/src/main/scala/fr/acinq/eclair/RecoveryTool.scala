@@ -43,7 +43,8 @@ object RecoveryTool extends Logging {
 
     val nodeUri = getInput[NodeURI]("Please insert the URI of the target node: ", s => NodeURI.parse(s))
     val backup = getInput[StaticBackup]("Please insert the absolute path of the backup file: ", path => {
-      serialization.read[StaticBackup](Source.fromFile(path).mkString)
+      val fileContent = Source.fromFile(path).mkString
+      serialization.read[StaticBackup](fileContent)
     })
 
     println(s"### Attempting channel recovery now - good luck! ###")
