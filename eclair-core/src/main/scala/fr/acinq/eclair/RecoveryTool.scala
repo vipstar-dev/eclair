@@ -14,7 +14,6 @@ import fr.acinq.eclair.crypto.{KeyManager, LocalKeyManager, ShaChain}
 import fr.acinq.eclair.io.{NodeURI, Peer, ReconnectWithCommitments}
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
-import fr.acinq.eclair.wire.ChannelCodecs._
 import fr.acinq.eclair.wire.ChannelUpdate
 import scodec.bits.ByteVector
 import akka.pattern._
@@ -27,6 +26,8 @@ import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.Source
+import JsonSupport.formats
+import JsonSupport.serialization
 
 object RecoveryTool extends Logging {
 
@@ -35,9 +36,6 @@ object RecoveryTool extends Logging {
   private lazy val scanner = new java.util.Scanner(System.in).useDelimiter("\\n")
 
   def interactiveRecovery(appKit: Kit): Unit = {
-
-    import JsonSupport.serialization
-    import JsonSupport.formats
 
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
 
@@ -64,9 +62,6 @@ object RecoveryTool extends Logging {
   }
 
   def storeBackup(nodeParams: NodeParams, channelData: HasCommitments) = Future {
-
-    import JsonSupport.formats
-    import JsonSupport.serialization
 
     val backup = StaticBackup(
       channelId = channelData.channelId,
@@ -95,7 +90,7 @@ object RecoveryTool extends Logging {
   }
 
   def doRecovery(appKit: Kit, backup: StaticBackup, uri: NodeURI): Future[Unit] = {
-    require(backup.remoteNodeId == uri.nodeId)
+    require(backup.remoteNodeId == uri.nodeId, "The backup does not match the provided node URI")
 
     implicit val timeout = Timeout(10 minutes)
     implicit val shttp = OkHttpFutureBackend()
