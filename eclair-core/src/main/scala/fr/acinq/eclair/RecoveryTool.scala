@@ -62,7 +62,7 @@ object RecoveryTool extends Logging {
     throw new IllegalArgumentException("Unable to get input")
   }
 
-  def storeBackup(nodeParams: NodeParams, channelData: DATA_WAIT_FOR_FUNDING_CONFIRMED) = Future {
+  def storeBackup(nodeParams: NodeParams, channelData: HasCommitments) = Future {
 
     import JsonSupport.formats
     import JsonSupport.serialization
@@ -75,12 +75,16 @@ object RecoveryTool extends Logging {
       remoteNodeId = channelData.commitments.remoteParams.nodeId
     )
 
-    if(nodeParams.db.dbDir.isEmpty){
+    if (nodeParams.db.dbDir.isEmpty) {
       logger.warn(s"No database folder defined, skipping static backup")
     }
 
     nodeParams.db.dbDir.foreach { dbDir =>
-      val channelBackup = new File(dbDir, "backup_"+backup.channelId.toHex+".json")
+
+      val backupDir = new File(dbDir, "channel-backups")
+      if (!backupDir.exists()) backupDir.mkdir()
+
+      val channelBackup = new File(backupDir, "backup_" + backup.channelId.toHex + ".json")
       val writer = new FileWriter(channelBackup)
       writer.write(serialization.writePretty(backup))
       writer.close()
