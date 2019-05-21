@@ -8,7 +8,7 @@ along with bitcoin-core and you have backed up your on-chain wallet, attempting 
 on-chain wallet will fail, please refer to https://bitcoin.org/en/secure-your-wallet#backup to backup your bitcoin 
 wallet file. Backups are per-channel and static, this means once you got a channel backup you don't have to update 
 it anymore. Note that https://github.com/ACINQ/eclair#backup has a different scope and will allow you to recover all
-funds in all the channels even if the remote peer is missing, however it does require constant update.
+funds in all the channels even if the remote peer is missing, however it does require constant update. 
 
 
 ### Expectations
@@ -20,18 +20,16 @@ For the recovery to work the remote peer must be online, reachable and cooperati
 ### Prerequisites
 
 - Bitcoin core up and running with the backup.
-- Seed.dat and channel backup available.
-- Knowledge of the channel short-id, or *id* of the funding transaction.
+- Seed.dat and backup file available.
 - Remote node is online and reachable.
 - Remote node supports `option_data_loss_protect`
 
-Note: with the id of the funding transaction is also possible to calculate the short-id.
-
 ### How to obtain a channel backup
 
-To back up a certain channel you must start eclair with the API enabled, please refer to [this procedure](https://github.com/ACINQ/eclair#configuring-eclair) 
-to configure eclair properly. Once running you need to call the `/backup` API endpoint and specify the target channel
-with the according parameters, the response is the actual backup and it looks like: `0004dcca8d9295baa71b6cdeea792850133a`. 
+Eclair will create a static backup for each channel inside `datadir/{chain}/static-backups` where chain depends on your 
+configuration and can be any of `mainnet`, `testnet`, `regtest`, backups file have a naming format such as "backup_{channelId}.json".
+You can also obtain a channel backup by directly invoking the `/backup` API and specifying the channel you want to back up,
+the response is json-encoded that can be saved to file, for more information please refer to the [documentation](https://acinq.github.com/eclair).
 
 
 ### Recovery attempt
@@ -44,9 +42,8 @@ there. For this guide we'll use the interactive procedure.
 
 1. Start eclair with the command-line option `-Declair.recoveryMode=true`
 2. Insert the `URI` of the target node
-3. Insert the channel backup
-4. Insert the shortChannelId, in the official format HEIGHTxTX_INDEXxOUT_INDEX
-5. Press enter and look at the logs.
+3. Insert the absolute path of the backup file on your filesystem.
+4. Press enter and look at the logs.
 
 If the recovery procedure was successful the remote node will broadcast its latest version of the commitment transaction,
 and eclair is able to immediately spend your output back to your on-chain wallet.
