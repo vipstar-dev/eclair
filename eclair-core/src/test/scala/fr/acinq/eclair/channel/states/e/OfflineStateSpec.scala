@@ -287,7 +287,7 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     // most importantly this data is made in such a way that it will trigger a channel failure from the remote
     val mockAliceState = RecoveryTool.makeDummyCommitment(
       keyManager = Alice.keyManager,
-      channelKeyPath = oldAliceState.commitments.localParams.channelKeyPath,
+      channelKeyPath = KeyPath(Seq(1, 2, 3, 4L)),
       remoteNodeId = Bob.nodeParams.nodeId,
       localNodeId = Alice.nodeParams.nodeId,
       channelId = oldAliceState.commitments.channelId,
