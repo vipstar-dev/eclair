@@ -107,6 +107,8 @@ trait Eclair {
   def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup]
 
   def attemptChannelRecovery(backup: StaticBackup, uri: String)(implicit timeout: Timeout): Future[Unit]
+
+  def deterministicChannelRecovery(shortChannelId: ShortChannelId, uri: NodeURI): Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair {
@@ -256,6 +258,10 @@ class EclairImpl(appKit: Kit) extends Eclair {
     val nodeUri = NodeURI.parse(uri)
 
     RecoveryTool.doRecovery(appKit, backup, nodeUri)
+  }
+
+  override def deterministicChannelRecovery(shortChannelId: ShortChannelId, uri: NodeURI): Future[Unit] = {
+    RecoveryTool.doDeterministicRecovery(appKit, shortChannelId, uri)
   }
 
   /**

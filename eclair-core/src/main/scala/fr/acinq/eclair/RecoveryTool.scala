@@ -39,14 +39,28 @@ object RecoveryTool extends Logging {
 
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
 
-    val nodeUri = getInput[NodeURI]("Please insert the URI of the target node: ", s => NodeURI.parse(s))
-    val backup = getInput[StaticBackup]("Please insert the absolute path of the backup file: ", path => {
-      val fileContent = Source.fromFile(path).mkString
-      serialization.read[StaticBackup](fileContent)
-    })
+    val nodeUri = getInput("Please insert the URI of the target node: ", s => NodeURI.parse(s))
+    if(!getInput("Do you have the backup y/n? ", getBoolInput)){
+      val shortId = getInput("Please insert the shortChannelId: ", ShortChannelId(_))
+      println(s"### Attempting channel recovery now - good luck! ###")
+      doDeterministicRecovery(appKit, shortId, nodeUri)
+    } else {
+      val backup = getInput("Please insert the absolute path of the backup file: ", path => {
+        val fileContent = Source.fromFile(path).mkString
+        serialization.read[StaticBackup](fileContent)
+      })
+      println(s"### Attempting channel recovery now - good luck! ###")
+      doRecovery(appKit, backup, nodeUri)
+    }
 
-    println(s"### Attempting channel recovery now - good luck! ###")
-    doRecovery(appKit, backup, nodeUri)
+  }
+
+  private def getBoolInput = { in: String =>
+    in match {
+      case "y" | "yes" => true
+      case "n" | "no"  => false
+      case _ => throw new IllegalArgumentException("Please answer y/n")
+    }
   }
 
   private def getInput[T](msg: String, parse: String => T): T = {
@@ -76,7 +90,6 @@ object RecoveryTool extends Logging {
     }
 
     nodeParams.db.dbDir.foreach { dbDir =>
-
       val backupDir = new File(dbDir, "channel-backups")
       if (!backupDir.exists()) backupDir.mkdir()
 
@@ -87,6 +100,36 @@ object RecoveryTool extends Logging {
       logger.info(s"Created static backup: ${channelBackup.getAbsolutePath}")
     }
 
+  }
+
+  def doDeterministicRecovery(appKit: Kit, shortChannelId: ShortChannelId, uri: NodeURI) = {
+
+    implicit val timeout = Timeout(10 minutes)
+    implicit val shttp = OkHttpFutureBackend()
+
+    val TxCoordinates(fundingHeight, fundingIndex, fundingOutputIndex) = ShortChannelId.coordinates(shortChannelId)
+
+    val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
+      user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
+      password = appKit.nodeParams.config.getString("bitcoind.rpcpassword"),
+      host = appKit.nodeParams.config.getString("bitcoind.host"),
+      port = appKit.nodeParams.config.getInt("bitcoind.rpcport")
+    )
+
+    val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
+
+    val fundingTx = Await.result(for {
+      fundingBlockHash <- bitcoinClient.getBlockHash(fundingHeight)
+      fundingBlock <- bitcoinClient.getBlock(fundingBlockHash)
+      funding = fundingBlock.tx(fundingIndex)
+      _ = logger.info(s"Found funding tx=${funding.txid}")
+    } yield funding, 60 seconds)
+
+    val keyPath = Peer.makeChannelKeyPathFromOutpoint(fundingTx.txIn.head)
+    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, fundingOutputIndex)
+    val backup = StaticBackup(channelId, fundingTx.txid, fundingOutputIndex, keyPath, uri.nodeId)
+
+    doRecovery(appKit, backup, uri)
   }
 
   def doRecovery(appKit: Kit, backup: StaticBackup, uri: NodeURI): Future[Unit] = {

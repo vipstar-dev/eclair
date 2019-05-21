@@ -33,6 +33,7 @@ import fr.acinq.eclair.secureRandom
 import fr.acinq.eclair.router._
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{wire, _}
+import grizzled.slf4j.Logging
 import scodec.Attempt
 import scodec.bits.ByteVector
 
@@ -516,7 +517,7 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
   override def mdc(currentMessage: Any): MDC = Logs.mdc(remoteNodeId_opt = Some(remoteNodeId))
 }
 
-object Peer {
+object Peer extends Logging {
 
   val CHANNELID_ZERO = ByteVector32.Zeroes
 
@@ -586,7 +587,9 @@ object Peer {
 
   def makeChannelKeyPathFromOutpoint(fundingInput: TxIn): KeyPath = {
     val inputEntropy = Crypto.sha256(fundingInput.outPoint.hash).take(4).toLong(signed = false)
-    KeyPath(Seq(47, 2, inputEntropy, 0))
+    val k = KeyPath(Seq(47, 2, inputEntropy, 0))
+    logger.info(s"Generated keypath=$k using txin=$fundingInput")
+    k
   }
 
   def makeChannelParams(nodeParams: NodeParams, defaultFinalScriptPubKey: ByteVector, isFunder: Boolean, fundingSatoshis: Long, fundingInput: TxIn): LocalParams = {
