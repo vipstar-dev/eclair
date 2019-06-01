@@ -17,7 +17,7 @@
 package fr.acinq.eclair.payment
 
 import akka.actor.{Actor, ActorLogging, Props, Status}
-import fr.acinq.bitcoin.{Crypto, MilliSatoshi}
+import fr.acinq.bitcoin.{ByteVector32, Crypto, MilliSatoshi}
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC, Channel}
 import fr.acinq.eclair.db.IncomingPayment
 import fr.acinq.eclair.payment.PaymentLifecycle.ReceivePayment
@@ -55,6 +55,17 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
       } match {
         case Success(paymentRequest) => sender ! paymentRequest
         case Failure(exception) => sender ! Status.Failure(exception)
+      }
+    case htlc: UpdateAddHtlcWithPreimage =>
+      val minFinalExpiry = Globals.blockCount.get() + Channel.MIN_CLTV_EXPIRY
+      if(htlc.cltvExpiry < minFinalExpiry)
+        sender ! CMD_FAIL_HTLC(htlc.id, Right(FinalExpiryTooSoon), commit = true)
+      else {
+        log.info(s"received payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat}")
+        // amount is correct or was not specified in the payment request
+        nodeParams.db.payments.addIncomingPayment(IncomingPayment(htlc.paymentHash, htlc.amountMsat, Platform.currentTime))
+        sender ! CMD_FULFILL_HTLC(htlc.id, htlc.preimage, commit = true)
+        context.system.eventStream.publish(PaymentReceived(MilliSatoshi(htlc.amountMsat), htlc.paymentHash, htlc.channelId))
       }
 
     case htlc: UpdateAddHtlc =>

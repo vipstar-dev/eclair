@@ -76,7 +76,9 @@ case class NodeParams(keyManager: KeyManager,
                       minFundingSatoshis: Long,
                       routerConf: RouterConf,
                       socksProxy_opt: Option[Socks5ProxyParams],
-                      maxPaymentAttempts: Int) {
+                      maxPaymentAttempts: Int,
+                      config: Config
+                     ) {
 
   val privateKey = keyManager.nodeKey.privateKey
   val nodeId = keyManager.nodeId
@@ -224,7 +226,8 @@ object NodeParams {
         searchRatioChannelCapacity = config.getDouble("router.path-finding.ratio-channel-capacity")
       ),
       socksProxy_opt = socksProxy_opt,
-      maxPaymentAttempts = config.getInt("max-payment-attempts")
+      maxPaymentAttempts = config.getInt("max-payment-attempts"),
+      config = config
     )
   }
 }

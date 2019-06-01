@@ -18,6 +18,7 @@ package fr.acinq.eclair
 
 import java.sql.{Connection, DriverManager}
 
+import com.typesafe.config.ConfigFactory
 import fr.acinq.bitcoin.Crypto.PrivateKey
 import fr.acinq.bitcoin.{Block, ByteVector32, Script}
 import fr.acinq.eclair.NodeParams.BITCOIND
@@ -28,6 +29,7 @@ import fr.acinq.eclair.io.Peer
 import fr.acinq.eclair.router.RouterConf
 import fr.acinq.eclair.wire.{Color, NodeAddress}
 import scodec.bits.ByteVector
+
 import scala.concurrent.duration._
 
 /**
@@ -96,7 +98,8 @@ object TestConstants {
         searchRatioChannelCapacity = 0.0
       ),
       socksProxy_opt = None,
-      maxPaymentAttempts = 5
+      maxPaymentAttempts = 5,
+      config = ConfigFactory.load()
     )
 
     def channelParams = Peer.makeChannelParams(
@@ -160,7 +163,8 @@ object TestConstants {
         searchRatioChannelCapacity = 0.0
       ),
       socksProxy_opt = None,
-      maxPaymentAttempts = 5
+      maxPaymentAttempts = 5,
+      config = ConfigFactory.load()
     )
 
     def channelParams = Peer.makeChannelParams(

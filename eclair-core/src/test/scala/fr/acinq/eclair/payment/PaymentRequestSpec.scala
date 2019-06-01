@@ -19,7 +19,7 @@ package fr.acinq.eclair.payment
 import java.nio.ByteOrder
 
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.{Block, Btc, ByteVector32, Crypto, MilliBtc, MilliSatoshi, Protocol, Satoshi}
+import fr.acinq.bitcoin.{Block, Btc, ByteVector32, Crypto, DeterministicWallet, MilliBtc, MilliSatoshi, MnemonicCode, Protocol, Satoshi}
 import fr.acinq.eclair.ShortChannelId
 import fr.acinq.eclair.payment.PaymentRequest._
 import org.scalatest.FunSuite
@@ -202,6 +202,35 @@ class PaymentRequestSpec extends FunSuite {
     assert(pr.tags.size == 3)
     assert(PaymentRequest.write(pr.sign(priv)) == ref)
   }
+
+//  test("generate a specially crafted payment request") {
+//
+//    val secret = 12345
+//    val amount = 333999
+//
+//    val preimage = Crypto.sha256(ByteVector.view(s"$secret || $amount || 0".getBytes))
+//    val paymentHash = Crypto.sha256(preimage)
+//    val seed = MnemonicCode.toSeed(List("same", "guitar", "into"), "")
+//
+//    val masterKey = DeterministicWallet.generate(seed)
+//    val privKey = masterKey.
+//    val pubKey = masterKey.publicKey
+//
+//    assert(pubKey.toHex == "")
+//
+//
+//    val paymentRequest = PaymentRequest(
+//      Block.LivenetGenesisBlock.hash,
+//      Some(MilliSatoshi(amount)),
+//      paymentHash,
+//      privKey,
+//      "",
+//      None,
+//      expirySeconds = None,
+//      extraHops = List.empty
+//    )
+//
+//  }
 
   test("On mainnet, with fallback (p2wsh) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3 and a minimum htlc cltv expiry of 12") {
     val ref = "lnbc20m1pvjluezcqpvpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q90qkf3gd7fcqs0ewr7t3xf72ptmc4n38evg0xhy4p64nlg7hgrmq6g997tkrvezs8afs0x0y8v4vs8thwsk6knkvdfvfa7wmhhpcsxcqw0ny48"

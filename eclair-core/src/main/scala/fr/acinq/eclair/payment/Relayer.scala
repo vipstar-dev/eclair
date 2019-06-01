@@ -29,9 +29,9 @@ import fr.acinq.eclair.payment.PaymentLifecycle.{PaymentFailed, PaymentSucceeded
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{NodeParams, ShortChannelId, nodeFee}
-import scodec.bits.BitVector
+import scodec.bits.{BitVector, ByteVector}
 import scodec.{Attempt, DecodeResult}
-
+import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
 
@@ -66,6 +66,11 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
 
   val commandBuffer = context.actorOf(Props(new CommandBuffer(nodeParams, register)))
 
+  val virtualNodes: Map[PublicKey, Long] = nodeParams.config.getStringList("eclair.virtualNodes").toList.map { virtualNodeIdAndSecret =>
+    val Array(nodeId, secret) = virtualNodeIdAndSecret.split(":")
+    PublicKey(ByteVector.fromValidHex(nodeId)) -> secret.toLong
+  }.toMap
+
   override def receive: Receive = main(Map.empty, new mutable.HashMap[PublicKey, mutable.Set[ShortChannelId]] with mutable.MultiMap[PublicKey, ShortChannelId])
 
   def main(channelUpdates: Map[ShortChannelId, OutgoingChannel], node2channels: mutable.HashMap[PublicKey, mutable.Set[ShortChannelId]] with mutable.MultiMap[PublicKey, ShortChannelId]): Receive = {
@@ -99,6 +104,23 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
           }
         case Success(r: RelayPayload) =>
           val selectedShortChannelId = if (canRedirect) selectPreferredChannel(r, channelUpdates, node2channels) else r.payload.shortChannelId
+
+          // check if the payment is going to a virtual node
+          val nextHopNodeId = PublicKey(r.nextPacket.publicKey)
+          virtualNodes.get(nextHopNodeId).flatMap { secret =>
+            derivePaymentPreimage(secret, r.add.amountMsat, r.add.paymentHash)
+          }.foreach { preimage =>
+            paymentHandler forward UpdateAddHtlcWithPreimage(
+              r.add.channelId,
+              r.add.id,
+              r.add.amountMsat,
+              r.add.paymentHash,
+              preimage,
+              r.add.cltvExpiry,
+              r.add.onionRoutingPacket
+            )
+          }
+
           handleRelay(r, channelUpdates.get(selectedShortChannelId).map(_.channelUpdate)) match {
             case Left(cmdFail) =>
               log.info(s"rejecting htlc #${add.id} paymentHash=${add.paymentHash} from channelId=${add.channelId} to shortChannelId=${r.payload.shortChannelId} reason=${cmdFail.reason}")
@@ -282,6 +304,21 @@ object Relayer {
         val isRedirected = (channelUpdate.shortChannelId != payload.shortChannelId) // we may decide to use another channel (to the same node) from the one requested
         Right(CMD_ADD_HTLC(payload.amtToForward, add.paymentHash, payload.outgoingCltvValue, nextPacket.serialize, upstream = Right(add), commit = true, redirected = isRedirected))
     }
+  }
+
+  def derivePaymentPreimage(secret: Long, amount: Long, paymentHash: ByteVector32): Option[ByteVector32] = {
+
+    for(i <- 0 to 50){
+
+      val preimage = Crypto.sha256(ByteVector(s"$secret$amount$i".getBytes))
+
+      if(Crypto.sha256(preimage) === paymentHash){
+        return Some(preimage)
+      }
+
+    }
+
+    None
   }
 
   /**
