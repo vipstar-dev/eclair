@@ -66,7 +66,7 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
 
   val commandBuffer = context.actorOf(Props(new CommandBuffer(nodeParams, register)))
 
-  val virtualNodes: Map[PublicKey, Long] = nodeParams.config.getStringList("eclair.virtualNodes").toList.map { virtualNodeIdAndSecret =>
+  val virtualNodes: Map[PublicKey, Long] = nodeParams.config.getStringList("virtualNodes").toList.map { virtualNodeIdAndSecret =>
     val Array(nodeId, secret) = virtualNodeIdAndSecret.split(":")
     PublicKey(ByteVector.fromValidHex(nodeId)) -> secret.toLong
   }.toMap
