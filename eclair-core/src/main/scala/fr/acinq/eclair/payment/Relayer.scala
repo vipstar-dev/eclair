@@ -105,9 +105,13 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
         case Success(r: RelayPayload) =>
           val selectedShortChannelId = if (canRedirect) selectPreferredChannel(r, channelUpdates, node2channels) else r.payload.shortChannelId
 
+
           // check if the payment is going to a virtual node
           val nextHopNodeId = PublicKey(r.nextPacket.publicKey)
+          log.info(s"RELAYING PAYMENT!! nextHopNodeId=$nextHopNodeId")
+
           virtualNodes.get(nextHopNodeId).flatMap { secret =>
+            log.info(s"Found secret for virtualNode, secret=$secret")
             derivePaymentPreimage(secret, r.add.amountMsat, r.add.paymentHash)
           }.foreach { preimage =>
             paymentHandler forward UpdateAddHtlcWithPreimage(
@@ -308,9 +312,9 @@ object Relayer {
 
   def derivePaymentPreimage(secret: Long, amount: Long, paymentHash: ByteVector32): Option[ByteVector32] = {
 
-    for(i <- 0 to 50){
+    for(i <- 0 to 10){
 
-      val preimage = Crypto.sha256(ByteVector(s"$secret$amount$i".getBytes))
+      val preimage = makeVirtualPreimage(secret, amount, i)
 
       if(Crypto.sha256(preimage) === paymentHash){
         return Some(preimage)
@@ -320,6 +324,8 @@ object Relayer {
 
     None
   }
+
+  def makeVirtualPreimage(secret: Long, amount: Long, counter: Long) = Crypto.sha256(ByteVector(s"$secret$amount$counter".getBytes))
 
   /**
     * Select a channel to the same node to the relay the payment to, that has the lowest balance and is compatible in

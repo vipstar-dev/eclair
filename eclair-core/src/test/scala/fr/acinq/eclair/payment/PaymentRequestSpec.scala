@@ -203,20 +203,23 @@ class PaymentRequestSpec extends FunSuite {
     assert(PaymentRequest.write(pr.sign(priv)) == ref)
   }
 
-//  test("generate a specially crafted payment request") {
-//
-//    val secret = 12345
-//    val amount = 333999
-//
-//    val preimage = Crypto.sha256(ByteVector.view(s"$secret || $amount || 0".getBytes))
-//    val paymentHash = Crypto.sha256(preimage)
-//    val seed = MnemonicCode.toSeed(List("same", "guitar", "into"), "")
-//
-//    val masterKey = DeterministicWallet.generate(seed)
-//    val privKey = masterKey.
-//    val pubKey = masterKey.publicKey
-//
-//    assert(pubKey.toHex == "")
+  test("generate a specially crafted payment request") {
+
+    val secret = 123456
+    val amount = 32000
+
+    val preimage = Relayer.makeVirtualPreimage(secret, amount, counter = 0)
+    val paymentHash = Crypto.sha256(preimage)
+
+    println(s"preimage=$preimage")
+    println(s"paymentHash=$paymentHash")
+
+    val seed = MnemonicCode.toSeed(List("same", "guitar", "into"), "")
+
+    val masterKey = DeterministicWallet.generate(seed)
+    val pubKey = masterKey.publicKey
+
+    assert(pubKey.toHex == "")
 //
 //
 //    val paymentRequest = PaymentRequest(
@@ -229,8 +232,8 @@ class PaymentRequestSpec extends FunSuite {
 //      expirySeconds = None,
 //      extraHops = List.empty
 //    )
-//
-//  }
+
+  }
 
   test("On mainnet, with fallback (p2wsh) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3 and a minimum htlc cltv expiry of 12") {
     val ref = "lnbc20m1pvjluezcqpvpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q90qkf3gd7fcqs0ewr7t3xf72ptmc4n38evg0xhy4p64nlg7hgrmq6g997tkrvezs8afs0x0y8v4vs8thwsk6knkvdfvfa7wmhhpcsxcqw0ny48"
