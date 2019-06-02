@@ -29,8 +29,10 @@ import fr.acinq.eclair.payment.PaymentLifecycle.{PaymentFailed, PaymentSucceeded
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{NodeParams, ShortChannelId, nodeFee}
+import grizzled.slf4j.Logging
 import scodec.bits.{BitVector, ByteVector}
 import scodec.{Attempt, DecodeResult}
+
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
@@ -103,17 +105,17 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
               paymentHandler forward addHtlc
           }
         case Success(r: RelayPayload) =>
-          val selectedShortChannelId = if (canRedirect) selectPreferredChannel(r, channelUpdates, node2channels) else r.payload.shortChannelId
+         // val selectedShortChannelId = if (canRedirect) selectPreferredChannel(r, channelUpdates, node2channels) else r.payload.shortChannelId
 
 
           // check if the payment is going to a virtual node
           val nextHopNodeId = PublicKey(r.nextPacket.publicKey)
           log.info(s"RELAYING PAYMENT!! nextHopNodeId=$nextHopNodeId")
 
-          virtualNodes.get(nextHopNodeId).flatMap { secret =>
-            log.info(s"Found secret for virtualNode, secret=$secret")
-            derivePaymentPreimage(secret, r.add.amountMsat, r.add.paymentHash)
-          }.foreach { preimage =>
+          val virtualSecret = 123456
+          log.info(s"Looking for preimage with secret=$virtualSecret")
+          derivePaymentPreimage(virtualSecret, r.add.amountMsat, r.add.paymentHash).foreach { preimage =>
+            log.info(s"FOUND PREIMAGE YEAH! preimage=$preimage")
             paymentHandler forward UpdateAddHtlcWithPreimage(
               r.add.channelId,
               r.add.id,
@@ -125,14 +127,14 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
             )
           }
 
-          handleRelay(r, channelUpdates.get(selectedShortChannelId).map(_.channelUpdate)) match {
-            case Left(cmdFail) =>
-              log.info(s"rejecting htlc #${add.id} paymentHash=${add.paymentHash} from channelId=${add.channelId} to shortChannelId=${r.payload.shortChannelId} reason=${cmdFail.reason}")
-              commandBuffer ! CommandBuffer.CommandSend(add.channelId, add.id, cmdFail)
-            case Right(cmdAdd) =>
-              log.info(s"forwarding htlc #${add.id} paymentHash=${add.paymentHash} from channelId=${add.channelId} to shortChannelId=$selectedShortChannelId")
-              register ! Register.ForwardShortId(selectedShortChannelId, cmdAdd)
-          }
+//          handleRelay(r, channelUpdates.get(selectedShortChannelId).map(_.channelUpdate)) match {
+//            case Left(cmdFail) =>
+//              log.info(s"rejecting htlc #${add.id} paymentHash=${add.paymentHash} from channelId=${add.channelId} to shortChannelId=${r.payload.shortChannelId} reason=${cmdFail.reason}")
+//              commandBuffer ! CommandBuffer.CommandSend(add.channelId, add.id, cmdFail)
+//            case Right(cmdAdd) =>
+//              log.info(s"forwarding htlc #${add.id} paymentHash=${add.paymentHash} from channelId=${add.channelId} to shortChannelId=$selectedShortChannelId")
+//              register ! Register.ForwardShortId(selectedShortChannelId, cmdAdd)
+//          }
         case Failure(t) =>
           log.warning(s"couldn't parse onion: reason=${t.getMessage}")
           val cmdFail = CMD_FAIL_MALFORMED_HTLC(add.id, Crypto.sha256(add.onionRoutingPacket), failureCode = FailureMessageCodecs.BADONION, commit = true)
@@ -226,7 +228,7 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
 
 }
 
-object Relayer {
+object Relayer extends Logging {
   def props(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorRef) = Props(classOf[Relayer], nodeParams, register, paymentHandler)
 
   case class OutgoingChannel(nextNodeId: PublicKey, channelUpdate: ChannelUpdate, availableBalanceMsat: Long)
@@ -312,10 +314,10 @@ object Relayer {
 
   def derivePaymentPreimage(secret: Long, amount: Long, paymentHash: ByteVector32): Option[ByteVector32] = {
 
-    for(i <- 0 to 10){
+    for(i <- 0 to 50){
 
       val preimage = makeVirtualPreimage(secret, amount, i)
-
+      logger.info(s"Computing counter=$i preimage=$preimage")
       if(Crypto.sha256(preimage) === paymentHash){
         return Some(preimage)
       }
