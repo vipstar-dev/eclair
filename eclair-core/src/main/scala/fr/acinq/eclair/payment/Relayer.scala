@@ -107,14 +107,16 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
         case Success(r: RelayPayload) =>
          // val selectedShortChannelId = if (canRedirect) selectPreferredChannel(r, channelUpdates, node2channels) else r.payload.shortChannelId
 
-
           // check if the payment is going to a virtual node
           val nextHopNodeId = PublicKey(r.nextPacket.publicKey)
           log.info(s"RELAYING PAYMENT!! nextHopNodeId=$nextHopNodeId")
 
+          val coord = ShortChannelId.coordinates(r.payload.shortChannelId)
+          log.info(s"SHORT_CHANNEL_ID=${r.payload.shortChannelId}")
+          log.info(s"OUT_INDEX=${coord.outputIndex}")
+
           val virtualSecret = 123456
-          log.info(s"Looking for preimage with secret=$virtualSecret")
-          derivePaymentPreimage(virtualSecret, r.add.amountMsat, r.add.paymentHash).foreach { preimage =>
+          derivePaymentPreimage(virtualSecret, r.add.amountMsat, coord.outputIndex, r.add.paymentHash).foreach { preimage =>
             log.info(s"FOUND PREIMAGE YEAH! preimage=$preimage")
             paymentHandler forward UpdateAddHtlcWithPreimage(
               r.add.channelId,
@@ -312,20 +314,17 @@ object Relayer extends Logging {
     }
   }
 
-  def derivePaymentPreimage(secret: Long, amount: Long, paymentHash: ByteVector32): Option[ByteVector32] = {
+  def derivePaymentPreimage(secret: Long, amount: Long, counter: Int, paymentHash: ByteVector32): Option[ByteVector32] = {
 
-    for(i <- 0 to 50){
+    val preimage = makeVirtualPreimage(secret, amount, counter)
+    logger.info(s"Computing secret=$secret amount=$amount counter=$counter preimage=$preimage")
+    if(Crypto.sha256(preimage) === paymentHash)
+      Some(preimage)
+    else
+      None
 
-      val preimage = makeVirtualPreimage(secret, amount, i)
-      logger.info(s"Computing counter=$i preimage=$preimage")
-      if(Crypto.sha256(preimage) === paymentHash){
-        return Some(preimage)
-      }
-
-    }
-
-    None
   }
+
 
   def makeVirtualPreimage(secret: Long, amount: Long, counter: Long) = Crypto.sha256(ByteVector(s"$secret$amount$counter".getBytes))
 
