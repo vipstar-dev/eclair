@@ -24,10 +24,10 @@ import akka.util.Timeout
 import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.ShortChannelId
+import fr.acinq.eclair.io.NodeURI
 import fr.acinq.eclair.payment.PaymentRequest
 import org.json4s.Formats
 import scodec.bits.ByteVector
-
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
@@ -59,6 +59,10 @@ object FormParamExtractors {
 
   implicit val timeoutSecondsUnmarshaller: Unmarshaller[String, Timeout] = Unmarshaller.strict { str =>
     Timeout(str.toInt.seconds)
+  }
+
+  implicit val nodeURIUnmarshaller: Unmarshaller[String, NodeURI] = Unmarshaller.strict { str =>
+    NodeURI.parse(str)
   }
 
   implicit val pubkeyListUnmarshaller: Unmarshaller[String, List[PublicKey]] = Unmarshaller.strict { str =>

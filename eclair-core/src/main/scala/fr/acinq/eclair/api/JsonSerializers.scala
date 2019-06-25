@@ -22,8 +22,8 @@ import java.util.UUID
 import com.google.common.net.HostAndPort
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport.ShouldWritePretty
-import fr.acinq.bitcoin.Crypto.{Point, PrivateKey, PublicKey, Scalar}
-import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi, OutPoint, Transaction}
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoin.{ByteVector32, ByteVector64, MilliSatoshi, OutPoint, Transaction}
 import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.channel.State
 import fr.acinq.eclair.crypto.ShaChain
@@ -48,6 +48,10 @@ class ByteVectorSerializer extends CustomSerializer[ByteVector](format => ({ nul
 
 class ByteVector32Serializer extends CustomSerializer[ByteVector32](format => ({ null }, {
   case x: ByteVector32 => JString(x.toHex)
+}))
+
+class ByteVector64Serializer extends CustomSerializer[ByteVector64](format => ({ null }, {
+  case x: ByteVector64 => JString(x.toHex)
 }))
 
 class UInt64Serializer extends CustomSerializer[UInt64](format => ({ null }, {
@@ -78,20 +82,19 @@ class PrivateKeySerializer extends CustomSerializer[PrivateKey](format => ({ nul
   case x: PrivateKey => JString("XXX")
 }))
 
-class PointSerializer extends CustomSerializer[Point](format => ({ null }, {
-  case x: Point => JString(x.toString())
-}))
-
-class ScalarSerializer extends CustomSerializer[Scalar](format => ({ null }, {
-  case x: Scalar => JString("XXX")
-}))
 
 class TransactionSerializer extends CustomSerializer[TransactionWithInputInfo](ser = format => ({ null }, {
-  case x: Transaction => JString(x.toString())
+  case x: Transaction => JObject(List(
+    JField("txid", JString(x.txid.toHex)),
+    JField("tx", JString(x.toString()))
+  ))
 }))
 
 class TransactionWithInputInfoSerializer extends CustomSerializer[TransactionWithInputInfo](ser = format => ({ null }, {
-  case x: TransactionWithInputInfo => JString(x.tx.toString())
+  case x: TransactionWithInputInfo => JObject(List(
+    JField("txid", JString(x.tx.txid.toHex)),
+    JField("tx", JString(x.tx.toString()))
+  ))
 }))
 
 class InetSocketAddressSerializer extends CustomSerializer[InetSocketAddress](format => ({ null }, {
@@ -208,6 +211,7 @@ object JsonSupport extends Json4sSupport {
   implicit val formats = org.json4s.DefaultFormats +
     new ByteVectorSerializer +
     new ByteVector32Serializer +
+    new ByteVector64Serializer +
     new UInt64Serializer +
     new MilliSatoshiSerializer +
     new ShortChannelIdSerializer +
@@ -215,8 +219,6 @@ object JsonSupport extends Json4sSupport {
     new ShaChainSerializer +
     new PublicKeySerializer +
     new PrivateKeySerializer +
-    new ScalarSerializer +
-    new PointSerializer +
     new TransactionSerializer +
     new TransactionWithInputInfoSerializer +
     new InetSocketAddressSerializer +

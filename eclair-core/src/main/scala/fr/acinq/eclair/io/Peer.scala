@@ -23,22 +23,20 @@ import java.nio.ByteOrder
 import akka.actor.{ActorRef, FSM, OneForOneStrategy, PoisonPill, Props, Status, SupervisorStrategy, Terminated}
 import akka.event.Logging.MDC
 import akka.util.Timeout
+import com.google.common.net.HostAndPort
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{ByteVector32, Crypto, DeterministicWallet, MilliSatoshi, Protocol, Satoshi, TxIn}
 import fr.acinq.eclair.blockchain.EclairWallet
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.TransportHandler
-import fr.acinq.eclair.secureRandom
 import fr.acinq.eclair.router._
 import fr.acinq.eclair.wire._
-import fr.acinq.eclair.{wire, _}
+import fr.acinq.eclair.{secureRandom, wire, _}
 import grizzled.slf4j.Logging
 import scodec.Attempt
 import scodec.bits.ByteVector
-
 import scala.compat.Platform
-import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.Random
 
@@ -64,26 +62,34 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
   }
 
   when(DISCONNECTED) {
-    case Event(Peer.Connect(NodeURI(_, hostAndPort)), d: DisconnectedData) =>
-      val address = new InetSocketAddress(hostAndPort.getHost, hostAndPort.getPort)
-      if (d.address_opt.contains(address)) {
-        // we already know this address, we'll reconnect automatically
-        sender ! "reconnection in progress"
-        stay
-      } else {
-        // we immediately process explicit connection requests to new addresses
-        context.actorOf(Client.props(nodeParams, authenticator, address, remoteNodeId, origin_opt = Some(sender())))
-        stay
+    case Event(Peer.Connect(_, address_opt), d: DisconnectedData) =>
+      address_opt
+        .map(hostAndPort2InetSocketAddress)
+        .orElse(getPeerAddressFromNodeAnnouncement) match {
+        case None =>
+          sender ! "no address found"
+          stay
+        case Some(address) =>
+          if (d.address_opt.contains(address)) {
+            // we already know this address, we'll reconnect automatically
+            sender ! "reconnection in progress"
+            stay
+          } else {
+            // we immediately process explicit connection requests to new addresses
+            context.actorOf(Client.props(nodeParams, authenticator, address, remoteNodeId, origin_opt = Some(sender())))
+            stay using d.copy(address_opt = Some(address))
+          }
       }
 
     case Event(Reconnect, d: DisconnectedData) =>
-      d.address_opt match {
-        case None => stay // no-op (this peer didn't initiate the connection and doesn't have the ip of the counterparty)
-        case _ if d.channels.isEmpty => stay // no-op (no more channels with this peer)
+      d.address_opt.orElse(getPeerAddressFromNodeAnnouncement) match {
+        case _ if d.channels.isEmpty => stay // no-op, no more channels with this peer
+        case None                    => stay // no-op, we don't know any address to this peer and we won't try reconnecting again
         case Some(address) =>
           context.actorOf(Client.props(nodeParams, authenticator, address, remoteNodeId, origin_opt = None))
+          log.info(s"reconnecting to $address")
           // exponential backoff retry with a finite max
-          setTimer(RECONNECT_TIMER, Reconnect, Math.min(10 + Math.pow(2, d.attempts), 60) seconds, repeat = false)
+          setTimer(RECONNECT_TIMER, Reconnect, Math.min(10 + Math.pow(2, d.attempts), 3600) seconds, repeat = false)
           stay using d.copy(attempts = d.attempts + 1)
       }
 
@@ -182,6 +188,18 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
       } else {
         stay using d.copy(channels = channels1)
       }
+
+    case Event(Disconnect(nodeId), d: InitializingData) if nodeId == remoteNodeId =>
+      log.info("disconnecting")
+      sender ! "disconnecting"
+      d.transport ! PoisonPill
+      stay
+
+    case Event(unhandledMsg: LightningMessage, d: InitializingData) =>
+      // we ack unhandled messages because we don't want to block further reads on the connection
+      d.transport ! TransportHandler.ReadAck(unhandledMsg)
+      log.warning(s"acking unhandled message $unhandledMsg")
+      stay
   }
 
   when(CONNECTED) {
@@ -260,22 +278,26 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
       stay
 
     case Event(c: Peer.OpenChannel, d: ConnectedData) =>
-      val (channel, localParams) = createNewChannel(nodeParams, funder = true, c.fundingSatoshis.toLong, origin_opt = Some(sender))
+      val channel = spawnChannel(nodeParams, origin_opt = Some(sender))
       c.timeout_opt.map(openTimeout => context.system.scheduler.scheduleOnce(openTimeout.duration, channel, Channel.TickChannelOpenTimeout)(context.dispatcher))
       val temporaryChannelId = randomBytes32
       val channelFeeratePerKw = Globals.feeratesPerKw.get.blocks_2
       val fundingTxFeeratePerKw = c.fundingTxFeeratePerKw_opt.getOrElse(Globals.feeratesPerKw.get.blocks_6)
-      log.info(s"requesting a new channel with fundingSatoshis=${c.fundingSatoshis}, pushMsat=${c.pushMsat} and fundingFeeratePerByte=${c.fundingTxFeeratePerKw_opt} temporaryChannelId=$temporaryChannelId localParams=$localParams")
-      channel ! INPUT_INIT_FUNDER(temporaryChannelId, c.fundingSatoshis.amount, c.pushMsat.amount, channelFeeratePerKw, fundingTxFeeratePerKw, localParams, d.transport, d.remoteInit, c.channelFlags.getOrElse(nodeParams.channelFlags))
+      log.info(s"requesting a new channel with fundingSatoshis=${c.fundingSatoshis}, pushMsat=${c.pushMsat} and fundingFeeratePerByte=${c.fundingTxFeeratePerKw_opt} temporaryChannelId=$temporaryChannelId")
+      channel ! INPUT_INIT_FUNDER(temporaryChannelId, c.fundingSatoshis.amount, c.pushMsat.amount, channelFeeratePerKw, fundingTxFeeratePerKw, d.transport, d.remoteInit, c.channelFlags.getOrElse(nodeParams.channelFlags))
       stay using d.copy(channels = d.channels + (TemporaryChannelId(temporaryChannelId) -> channel))
 
     case Event(msg: wire.OpenChannel, d: ConnectedData) =>
       d.transport ! TransportHandler.ReadAck(msg)
       d.channels.get(TemporaryChannelId(msg.temporaryChannelId)) match {
         case None =>
-          val (channel, localParams) = createNewChannel(nodeParams, funder = false, fundingSatoshis = msg.fundingSatoshis, origin_opt = None)
+
+          val channel = spawnChannel(nodeParams, origin_opt = None)
+          val defaultFinalScriptPubkey = Helpers.getFinalScriptPubKey(wallet, nodeParams.chainHash)
+          val localParams = Channel.makeFundeeChannelParams(nodeParams, msg, defaultFinalScriptPubkey, msg.fundingSatoshis)
           val temporaryChannelId = msg.temporaryChannelId
-          log.info(s"accepting a new channel to $remoteNodeId temporaryChannelId=$temporaryChannelId localParams=$localParams")
+          log.info(s"accepting a new channel to $remoteNodeId temporaryChannelId=$temporaryChannelId")
+
           channel ! INPUT_INIT_FUNDEE(temporaryChannelId, localParams, d.transport, d.remoteInit)
           channel ! msg
           stay using d.copy(channels = d.channels + (TemporaryChannelId(temporaryChannelId) -> channel))
@@ -416,7 +438,9 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
       log.info(s"resuming processing of network announcements for peer")
       stay using d.copy(behavior = d.behavior.copy(fundingTxAlreadySpentCount = 0, ignoreNetworkAnnouncement = false))
 
-    case Event(Disconnect, d: ConnectedData) =>
+    case Event(Disconnect(nodeId), d: ConnectedData) if nodeId == remoteNodeId =>
+      log.info(s"disconnecting")
+      sender ! "disconnecting"
       d.transport ! PoisonPill
       stay
 
@@ -447,6 +471,12 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
       d.channels.values.toSet[ActorRef].foreach(_ ! INPUT_DISCONNECTED) // we deduplicate with toSet because there might be two entries per channel (tmp id and final id)
       self ! h
       goto(DISCONNECTED) using DisconnectedData(d.address_opt, d.channels.collect { case (k: FinalChannelId, v) => (k, v) })
+
+    case Event(unhandledMsg: LightningMessage, d: ConnectedData) =>
+      // we ack unhandled messages because we don't want to block further reads on the connection
+      d.transport ! TransportHandler.ReadAck(unhandledMsg)
+      log.warning(s"acking unhandled message $unhandledMsg")
+      stay
   }
 
   whenUnhandled {
@@ -483,18 +513,8 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
 
   onTransition {
     case INSTANTIATING -> DISCONNECTED if nodeParams.autoReconnect && nextStateData.address_opt.isDefined => self ! Reconnect // we reconnect right away if we just started the peer
-    case _ -> DISCONNECTED if nodeParams.autoReconnect && nextStateData.address_opt.isDefined => setTimer(RECONNECT_TIMER, Reconnect, 1 second, repeat = false)
-    case DISCONNECTED -> _ if nodeParams.autoReconnect && stateData.address_opt.isDefined => cancelTimer(RECONNECT_TIMER)
-  }
-
-  def createNewChannel(nodeParams: NodeParams, funder: Boolean, fundingSatoshis: Long, origin_opt: Option[ActorRef]): (ActorRef, LocalParams) = {
-    val defaultFinalScriptPubKey = Helpers.getFinalScriptPubKey(wallet, nodeParams.chainHash)
-    val fundingInput = Await.result(wallet.makeFundingTx(defaultFinalScriptPubKey, Satoshi(fundingSatoshis), Globals.feeratesPerKw.get().blocks_6, lockUnspent = false).map { fundingResponse =>
-      fundingResponse.fundingTx.txIn.head
-    }, 60 seconds)
-    val localParams = makeChannelParams(nodeParams, defaultFinalScriptPubKey, funder, fundingSatoshis, fundingInput)
-    val channel = spawnChannel(nodeParams, origin_opt)
-    (channel, localParams)
+    case _ -> DISCONNECTED if nodeParams.autoReconnect => setTimer(RECONNECT_TIMER, Reconnect, 1 second, repeat = false)
+    case DISCONNECTED -> _ if nodeParams.autoReconnect => cancelTimer(RECONNECT_TIMER)
   }
 
   def spawnChannel(nodeParams: NodeParams, origin_opt: Option[ActorRef]): ActorRef = {
@@ -509,6 +529,11 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
     stop(FSM.Normal)
   }
 
+  // TODO gets the first of the list, improve selection?
+  def getPeerAddressFromNodeAnnouncement: Option[InetSocketAddress] = {
+    nodeParams.db.network.getNode(remoteNodeId).flatMap(_.addresses.headOption.map(_.socketAddress))
+  }
+
   // a failing channel won't be restarted, it should handle its states
   override val supervisorStrategy = OneForOneStrategy(loggingEnabled = true) { case _ => SupervisorStrategy.Stop }
 
@@ -517,7 +542,7 @@ class Peer(nodeParams: NodeParams, remoteNodeId: PublicKey, authenticator: Actor
   override def mdc(currentMessage: Any): MDC = Logs.mdc(remoteNodeId_opt = Some(remoteNodeId))
 }
 
-object Peer extends Logging {
+object Peer {
 
   val CHANNELID_ZERO = ByteVector32.Zeroes
 
@@ -557,9 +582,14 @@ object Peer extends Logging {
   case object CONNECTED extends State
 
   case class Init(previousKnownAddress: Option[InetSocketAddress], storedChannels: Set[HasCommitments])
-  case class Connect(uri: NodeURI)
+  case class Connect(nodeId: PublicKey, address_opt: Option[HostAndPort]) {
+    def uri: Option[NodeURI] = address_opt.map(NodeURI(nodeId, _))
+  }
+  object Connect {
+    def apply(uri: NodeURI): Connect = new Connect(uri.nodeId, Some(uri.address))
+  }
   case object Reconnect
-  case object Disconnect
+  case class Disconnect(nodeId: PublicKey)
   case object ResumeAnnouncements
   case class OpenChannel(remoteNodeId: PublicKey, fundingSatoshis: Satoshi, pushMsat: MilliSatoshi, fundingTxFeeratePerKw_opt: Option[Long], channelFlags: Option[Byte], timeout_opt: Option[Timeout]) {
     require(fundingSatoshis.amount < Channel.MAX_FUNDING_SATOSHIS, s"fundingSatoshis must be less than ${Channel.MAX_FUNDING_SATOSHIS}")
@@ -585,34 +615,6 @@ object Peer extends Logging {
 
   // @formatter:on
 
-  def makeChannelKeyPathFromOutpoint(fundingInput: TxIn): KeyPath = {
-    val inputEntropy = Crypto.sha256(fundingInput.outPoint.hash).take(4).toLong(signed = false)
-    val k = KeyPath(Seq(47, 2, inputEntropy, 0))
-    logger.info(s"Generated keypath=$k using txin=$fundingInput")
-    k
-  }
-
-  def makeChannelParams(nodeParams: NodeParams, defaultFinalScriptPubKey: ByteVector, isFunder: Boolean, fundingSatoshis: Long, fundingInput: TxIn): LocalParams = {
-    val channelKeyPath = makeChannelKeyPathFromOutpoint(fundingInput)
-    makeChannelParams(nodeParams, defaultFinalScriptPubKey, isFunder, fundingSatoshis, channelKeyPath)
-  }
-
-  def makeChannelParams(nodeParams: NodeParams, defaultFinalScriptPubKey: ByteVector, isFunder: Boolean, fundingSatoshis: Long, channelKeyPath: DeterministicWallet.KeyPath): LocalParams = {
-    LocalParams(
-      nodeParams.nodeId,
-      channelKeyPath,
-      dustLimitSatoshis = nodeParams.dustLimitSatoshis,
-      maxHtlcValueInFlightMsat = nodeParams.maxHtlcValueInFlightMsat,
-      channelReserveSatoshis = Math.max((nodeParams.reserveToFundingRatio * fundingSatoshis).toLong, nodeParams.dustLimitSatoshis), // BOLT #2: make sure that our reserve is above our dust limit
-      htlcMinimumMsat = nodeParams.htlcMinimumMsat,
-      toSelfDelay = nodeParams.toRemoteDelayBlocks, // we choose their delay
-      maxAcceptedHtlcs = nodeParams.maxAcceptedHtlcs,
-      defaultFinalScriptPubKey = defaultFinalScriptPubKey,
-      isFunder = isFunder,
-      globalFeatures = nodeParams.globalFeatures,
-      localFeatures = nodeParams.localFeatures)
-  }
-
   /**
     * Peer may want to filter announcements based on timestamp
     *
@@ -629,4 +631,6 @@ object Peer extends Logging {
       case _ => true // if there is a filter and message doesn't have a timestamp (e.g. channel_announcement), then we send it
     }
   }
+
+  def hostAndPort2InetSocketAddress(hostAndPort: HostAndPort): InetSocketAddress = new InetSocketAddress(hostAndPort.getHost, hostAndPort.getPort)
 }

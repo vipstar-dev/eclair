@@ -25,6 +25,8 @@ import fr.acinq.bitcoin.{Block, ByteVector32, OutPoint, Satoshi, Script, Transac
 import fr.acinq.eclair.NodeParams.BITCOIND
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.{LocalKeyManager, ShaChain}
+import fr.acinq.eclair.channel.{Channel, KeyPathFundee}
+import fr.acinq.eclair.crypto.LocalKeyManager
 import fr.acinq.eclair.db._
 import fr.acinq.eclair.db.sqlite._
 import fr.acinq.eclair.io.Peer
@@ -106,12 +108,11 @@ object TestConstants {
       maxPaymentAttempts = 5
     )
 
-    def channelParams = Peer.makeChannelParams(
+    def channelParams = Channel.makeChannelParams(
       nodeParams = nodeParams,
-      defaultFinalScriptPubKey = Script.write(Script.pay2wpkh(PrivateKey(randomBytes32, compressed = true).publicKey)),
-      isFunder = true,
+      defaultFinalScriptPubKey = Script.write(Script.pay2wpkh(PrivateKey(randomBytes32).publicKey)),
       fundingSatoshis,
-      KeyPath(Seq(1, 2, 3, 4L))
+      Left(KeyPath(Seq(1, 2, 3, 4L)))
     ).copy(
       channelReserveSatoshis = 10000 // Bob will need to keep that much satoshis as direct payment
     )
@@ -172,12 +173,11 @@ object TestConstants {
       maxPaymentAttempts = 5
     )
 
-    def channelParams = Peer.makeChannelParams(
+    def channelParams = Channel.makeChannelParams(
       nodeParams = nodeParams,
-      defaultFinalScriptPubKey = Script.write(Script.pay2wpkh(PrivateKey(randomBytes32, compressed = true).publicKey)),
-      isFunder = false,
+      defaultFinalScriptPubKey = Script.write(Script.pay2wpkh(PrivateKey(randomBytes32).publicKey)),
       fundingSatoshis,
-      KeyPath(Seq(1, 2, 3, 4L))
+      Right(KeyPathFundee(KeyPath(Seq(1, 2, 3, 4L)), KeyPath(Seq(1, 2, 3, 4L))))
     ).copy(
       channelReserveSatoshis = 20000 // Alice will need to keep that much satoshis as direct payment
     )
