@@ -16,20 +16,16 @@
 
 package fr.acinq.eclair
 
-import java.io.File
 import akka.actor.ActorSystem
 import akka.testkit.{TestKit, TestProbe}
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
 import fr.acinq.bitcoin.{ByteVector32, Crypto}
 import akka.util.Timeout
-import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
+import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.blockchain.TestWallet
 import fr.acinq.eclair.io.Peer.OpenChannel
 import fr.acinq.eclair.payment.PaymentLifecycle.{ReceivePayment, SendPayment, SendPaymentToRoute}
-import org.scalatest.{Outcome, fixture}
-import fr.acinq.eclair.payment.PaymentLifecycle.SendPayment
-import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
-import fr.acinq.eclair.payment.PaymentLifecycle.{SendPayment}
+
 import fr.acinq.eclair.payment.PaymentLifecycle.{ReceivePayment, SendPayment}
 import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
 import org.scalatest.{Matchers, Outcome, fixture}
@@ -263,24 +259,6 @@ class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSu
     assert(send.amountMsat == 1234)
     assert(send.finalCltvExpiry == 123)
     assert(send.paymentHash == ByteVector32.One)
-  }
-
-  test("getbackup should return the serialized keyPath of a channel") { f =>
-    import f._
-    implicit val ec = system.dispatcher
-
-    val expectedKeyPathSerialized = ChannelCodecs.keyPathCodec.encode(mockResGetInfo.data.asInstanceOf[DATA_NORMAL].commitments.localParams.channelKeyPath).require.toByteVector
-    val eclair = new EclairImpl(kit)
-    val fResponse = eclair.getChannelBackup(Left(ByteVector32.Zeroes))
-
-    register.expectMsg(Register.Forward(ByteVector32.Zeroes, CMD_GETINFO))
-    register.reply(mockResGetInfo)
-
-    awaitCond({ fResponse.value match {
-      case Some(Success(keyPathSerialized)) => keyPathSerialized === expectedKeyPathSerialized
-      case _ => false
-    }}, 30 seconds)
-
   }
 
 }

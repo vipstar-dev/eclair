@@ -26,12 +26,11 @@ import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest, WSProbe}
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
+import fr.acinq.bitcoin.Crypto.{PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{ByteVector32, Crypto, MilliSatoshi, OutPoint, Satoshi, Transaction, TxOut}
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{ByteVector32, Crypto, MilliSatoshi}
-import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.TestConstants._
 import fr.acinq.eclair._
 import fr.acinq.eclair.channel._
@@ -362,36 +361,6 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
         assert(status == OK)
         eclair.updateRelayFee(Left(ByteVector32.Zeroes), 123, 456)(any[Timeout]).wasCalled(once)
       }
-  }
-
-  test("'recovery' should accept a static backup as input") {
-
-    val eclair = mock[Eclair]
-    eclair.attemptChannelRecovery(any[StaticBackup], any[String])(any[Timeout]) returns Future.successful(())
-    val service = new MockService(eclair)
-
-    val rawStaticBackup =
-      """
-        |{
-        |  "channelId" : "c02b76d1fbb67c9c02b08a3ecde5d896874419dd324fa9d535f48209293b8bfa",
-        |  "fundingTxId" : "fa8b3b290982f435d5a94f32dd19448796d8e5cd3e8ab0029c7cb6fbd1762bc0",
-        |  "fundingOutputIndex" : 0,
-        |  "channelKeyPath" : {
-        |    "path" : [ 2977192772, 1149542640, 525879371, 1631046414 ]
-        |  },
-        |  "remoteNodeId" : "0318fdfc5fd8165e8258f1fd9468b8b19ba711a9acad7f113db3a8db94614bfe97"
-        |}
-      """.stripMargin
-
-    Post("/recovery", FormData("backup" -> rawStaticBackup, "uri" -> "030bb6a5e0c6b203c7e2180fb78c7ba4bdce46126761d8201b91ddac089cdecc87@93.137.102.239:9735").toEntity) ~>
-      addCredentials(BasicHttpCredentials("", service.password)) ~>
-      Route.seal(service.route) ~>
-      check {
-        assert(handled)
-        assert(status == OK)
-      }
-
-
   }
 
   test("the websocket should return typed objects") {

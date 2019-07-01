@@ -20,7 +20,7 @@ import akka.actor.Status
 import java.util.UUID
 import fr.acinq.eclair.channel.Channel._
 import akka.testkit.TestProbe
-import fr.acinq.bitcoin.Crypto.{Point, PublicKey, Scalar}
+import fr.acinq.bitcoin.Crypto.{PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{ByteVector32, OutPoint, Satoshi, ScriptFlags, Transaction, TxOut}
 import fr.acinq.eclair.TestConstants.{Alice, Bob}
@@ -289,7 +289,7 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
     // most importantly this data is made in such a way that it will trigger a channel failure from the remote
     val mockAliceState = RecoveryTool.makeDummyCommitment(
       keyManager = Alice.keyManager,
-      channelKeyPath = KeyPath(Seq(1, 2, 3, 4L)),
+      channelKeyPath = oldAliceState.commitments.localParams.channelKeyPath,
       remoteNodeId = Bob.nodeParams.nodeId,
       localNodeId = Alice.nodeParams.nodeId,
       channelId = oldAliceState.commitments.channelId,
@@ -322,13 +322,13 @@ class OfflineStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
 
     // peers exchange channel_reestablish messages
     val bobCommitments = bob.stateData.asInstanceOf[HasCommitments].commitments
-    val bobCurrentPerCommitmentPoint = Bob.keyManager.commitmentPoint(bobCommitments.localParams.channelKeyPath, bobCommitments.localCommit.index)
-    val aliceCurrentPerCommitmentPoint = Alice.keyManager.commitmentPoint(mockAliceState.commitments.localParams.channelKeyPath, mockAliceIndex)
+    val bobCurrentPerCommitmentPoint = Bob.keyManager.commitmentPoint(Channel.keyPath(bobCommitments.localParams), bobCommitments.localCommit.index)
+    val aliceCurrentPerCommitmentPoint = Alice.keyManager.commitmentPoint(Channel.keyPath(mockAliceState.commitments.localParams), mockAliceIndex)
     // that's what we expect from Bob, Alice's per-commitment-secret generated using the latest commitment index
-    val aliceLatestPerCommitmentSecret = Alice.keyManager.commitmentSecret(mockAliceState.commitments.localParams.channelKeyPath, effectiveLastCommitmentIndex - 1)
+    val aliceLatestPerCommitmentSecret = Alice.keyManager.commitmentSecret(Channel.keyPath(mockAliceState.commitments.localParams), effectiveLastCommitmentIndex - 1)
 
     // Alice sends the indexes and commitment points according to her (mistaken) view of the commitment, Bob will let her know she's behind
-    alice2bob.expectMsg(ChannelReestablish(oldAliceState.commitments.channelId, mockAliceIndex + 1, mockBobIndex, Some(Scalar(ByteVector32.Zeroes)), Some(aliceCurrentPerCommitmentPoint)))
+    alice2bob.expectMsg(ChannelReestablish(oldAliceState.commitments.channelId, mockAliceIndex + 1, mockBobIndex, Some(PrivateKey(ByteVector32.Zeroes)), Some(aliceCurrentPerCommitmentPoint)))
     bob2alice.expectMsg(ChannelReestablish(oldAliceState.commitments.channelId, effectiveLastCommitmentIndex + 1, effectiveLastCommitmentIndex, Some(aliceLatestPerCommitmentSecret), Some(bobCurrentPerCommitmentPoint)))
 
     // alice then realizes it has an old state...

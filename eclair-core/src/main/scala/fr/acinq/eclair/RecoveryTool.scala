@@ -1,12 +1,11 @@
 package fr.acinq.eclair
 
-import java.io.{File, FileWriter}
 
 import akka.util.Timeout
 import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
-import fr.acinq.bitcoin.Crypto.{Point, PublicKey}
+import fr.acinq.bitcoin.Crypto.{ PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{ByteVector32, OutPoint, Satoshi, Script, Transaction, TxOut}
+import fr.acinq.bitcoin.{ByteVector32, ByteVector64, OutPoint, Satoshi, Script, Transaction, TxOut}
 import fr.acinq.eclair.blockchain.bitcoind.BitcoinCoreWallet
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{BasicBitcoinJsonRPCClient, ExtendedBitcoinClient}
 import fr.acinq.eclair.channel._
@@ -14,7 +13,6 @@ import fr.acinq.eclair.crypto.{KeyManager, LocalKeyManager, ShaChain}
 import fr.acinq.eclair.io.{NodeURI, Peer, ReconnectWithCommitments}
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo}
-import fr.acinq.eclair.wire.ChannelUpdate
 import scodec.bits.ByteVector
 import akka.pattern._
 import fr.acinq.eclair.api.JsonSupport
@@ -24,14 +22,16 @@ import scala.compat.Platform
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Random, Success, Try}
 import scodec.bits._
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.Source
 import JsonSupport.formats
 import JsonSupport.serialization
+import fr.acinq.eclair.wire.ChannelUpdate
 
 object RecoveryTool extends Logging {
 
-  case class StaticBackup(channelId: ByteVector32, fundingTxId: ByteVector32, fundingOutputIndex: Long, channelKeyPath: KeyPath, remoteNodeId: PublicKey)
+  type RecoveryData = Either[(ByteVector32, Int), ShortChannelId]
 
   private lazy val scanner = new java.util.Scanner(System.in).useDelimiter("\\n")
 
@@ -43,14 +43,14 @@ object RecoveryTool extends Logging {
     if(!getInput("Do you have the backup y/n? ", getBoolInput)){
       val shortId = getInput("Please insert the shortChannelId: ", ShortChannelId(_))
       println(s"### Attempting channel recovery now - good luck! ###")
-      doDeterministicRecovery(appKit, shortId, nodeUri)
+      //doRecovery(appKit, shortId, nodeUri)
     } else {
       val backup = getInput("Please insert the absolute path of the backup file: ", path => {
         val fileContent = Source.fromFile(path).mkString
-        serialization.read[StaticBackup](fileContent)
+        serialization.read[String](fileContent)
       })
       println(s"### Attempting channel recovery now - good luck! ###")
-      doRecovery(appKit, backup, nodeUri)
+      //doRecovery(appKit, backup, nodeUri)
     }
 
   }
@@ -75,65 +75,7 @@ object RecoveryTool extends Logging {
     throw new IllegalArgumentException("Unable to get input")
   }
 
-  def storeBackup(nodeParams: NodeParams, channelData: HasCommitments) = Future {
-
-    val backup = StaticBackup(
-      channelId = channelData.channelId,
-      fundingTxId = channelData.commitments.commitInput.outPoint.txid,
-      fundingOutputIndex = channelData.commitments.commitInput.outPoint.index,
-      channelKeyPath = channelData.commitments.localParams.channelKeyPath,
-      remoteNodeId = channelData.commitments.remoteParams.nodeId
-    )
-
-    if (nodeParams.db.dbDir.isEmpty) {
-      logger.warn(s"No database folder defined, skipping static backup")
-    }
-
-    nodeParams.db.dbDir.foreach { dbDir =>
-      val backupDir = new File(dbDir, "channel-backups")
-      if (!backupDir.exists()) backupDir.mkdir()
-
-      val channelBackup = new File(backupDir, "backup_" + backup.channelId.toHex + ".json")
-      val writer = new FileWriter(channelBackup)
-      writer.write(serialization.writePretty(backup))
-      writer.close()
-      logger.info(s"Created static backup: ${channelBackup.getAbsolutePath}")
-    }
-
-  }
-
-  def doDeterministicRecovery(appKit: Kit, shortChannelId: ShortChannelId, uri: NodeURI) = {
-
-    implicit val timeout = Timeout(10 minutes)
-    implicit val shttp = OkHttpFutureBackend()
-
-    val TxCoordinates(fundingHeight, fundingIndex, fundingOutputIndex) = ShortChannelId.coordinates(shortChannelId)
-
-    val bitcoinRpcClient = new BasicBitcoinJsonRPCClient(
-      user = appKit.nodeParams.config.getString("bitcoind.rpcuser"),
-      password = appKit.nodeParams.config.getString("bitcoind.rpcpassword"),
-      host = appKit.nodeParams.config.getString("bitcoind.host"),
-      port = appKit.nodeParams.config.getInt("bitcoind.rpcport")
-    )
-
-    val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
-
-    val fundingTx = Await.result(for {
-      fundingBlockHash <- bitcoinClient.getBlockHash(fundingHeight)
-      fundingBlock <- bitcoinClient.getBlock(fundingBlockHash)
-      funding = fundingBlock.tx(fundingIndex)
-      _ = logger.info(s"Found funding tx=${funding.txid}")
-    } yield funding, 60 seconds)
-
-    val keyPath = Peer.makeChannelKeyPathFromOutpoint(fundingTx.txIn.head)
-    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, fundingOutputIndex)
-    val backup = StaticBackup(channelId, fundingTx.txid, fundingOutputIndex, keyPath, uri.nodeId)
-
-    doRecovery(appKit, backup, uri)
-  }
-
-  def doRecovery(appKit: Kit, backup: StaticBackup, uri: NodeURI): Future[Unit] = {
-    require(backup.remoteNodeId == uri.nodeId, "The backup does not match the provided node URI")
+  def doRecovery(appKit: Kit, fundingTxid: ByteVector32, fundingOutputIndex: Int, uri: NodeURI): Future[Unit] = {
 
     implicit val timeout = Timeout(10 minutes)
     implicit val shttp = OkHttpFutureBackend()
@@ -148,8 +90,8 @@ object RecoveryTool extends Logging {
     val bitcoinClient = new ExtendedBitcoinClient(bitcoinRpcClient)
 
     val (fundingTx, finalAddress, isFundingSpendable) = Await.result(for {
-      funding <- bitcoinClient.getTransaction(backup.fundingTxId.toHex)
-      isSpendable <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, backup.fundingOutputIndex.toInt, includeMempool = true)
+      funding <- bitcoinClient.getTransaction(fundingTxid.toHex)
+      isSpendable <- bitcoinClient.isTransactionOutputSpendable(funding.txid.toHex, fundingOutputIndex, includeMempool = true)
       address <- new BitcoinCoreWallet(bitcoinRpcClient).getFinalAddress
     } yield (funding, address, isSpendable), 60 seconds)
 
@@ -159,16 +101,16 @@ object RecoveryTool extends Logging {
     }
 
     val finalScriptPubkey = Script.write(addressToPublicKeyScript(finalAddress, appKit.nodeParams.chainHash))
-    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, backup.fundingOutputIndex.toInt)
+    val channelId = fr.acinq.eclair.toLongId(fundingTx.hash, fundingOutputIndex)
 
     val inputInfo = Transactions.InputInfo(
-      outPoint = OutPoint(fundingTx.hash, backup.fundingOutputIndex),
-      txOut = fundingTx.txOut(backup.fundingOutputIndex.toInt),
+      outPoint = OutPoint(fundingTx.hash, fundingOutputIndex),
+      txOut = fundingTx.txOut(fundingOutputIndex),
       redeemScript = ByteVector.empty
     )
 
-    logger.info(s"Recovery using: channelId=$channelId finalScriptPubKey=$finalAddress remotePeer=${backup.remoteNodeId}")
-    val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, backup.channelKeyPath, backup.remoteNodeId, appKit.nodeParams.nodeId, channelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
+    logger.info(s"Recovery using: channelId=$channelId finalScriptPubKey=$finalAddress remotePeer=${uri.nodeId}")
+    val commitments = makeDummyCommitment(appKit.nodeParams.keyManager, ???, uri.nodeId, appKit.nodeParams.nodeId, channelId, inputInfo, finalScriptPubkey, appKit.nodeParams.chainHash)
     (appKit.switchboard ? ReconnectWithCommitments(uri, commitments)).mapTo[Unit]
   }
 
@@ -177,7 +119,7 @@ object RecoveryTool extends Logging {
     */
   def makeDummyCommitment(
                            keyManager: KeyManager,
-                           channelKeyPath: KeyPath,
+                           channelKeyPath: Either[KeyPath, KeyPathFundee],
                            remoteNodeId: PublicKey,
                            localNodeId: PublicKey,
                            channelId: ByteVector32,
@@ -195,7 +137,6 @@ object RecoveryTool extends Logging {
         toSelfDelay = 0,
         htlcMinimumMsat = 0,
         maxAcceptedHtlcs = 0,
-        isFunder = true,
         defaultFinalScriptPubKey = finalScriptPubkey,
         globalFeatures = hex"00",
         localFeatures = hex"00"
@@ -270,7 +211,7 @@ object RecoveryTool extends Logging {
     buried = true,
     channelAnnouncement = None,
     channelUpdate = ChannelUpdate(
-      signature = ByteVector.empty,
+      signature = ByteVector64.Zeroes,
       chainHash = chainHash,
       shortChannelId = ShortChannelId("123x1x0"),
       timestamp = Platform.currentTime.milliseconds.toSeconds,

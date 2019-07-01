@@ -18,10 +18,10 @@ package fr.acinq.eclair
 
 import java.sql.{Connection, DriverManager}
 
-import fr.acinq.bitcoin.Crypto.{Point, PrivateKey, PublicKey}
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{Block, ByteVector32, OutPoint, Satoshi, Script, Transaction, TxOut}
+import fr.acinq.bitcoin.{Block, ByteVector32, ByteVector64, OutPoint, Satoshi, Script, Transaction, TxOut}
 import fr.acinq.eclair.NodeParams.BITCOIND
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.{LocalKeyManager, ShaChain}
@@ -37,6 +37,7 @@ import fr.acinq.eclair.transactions._
 import fr.acinq.eclair.wire.{ChannelUpdate, Color, NodeAddress, UpdateAddHtlc}
 import scodec.bits.ByteVector
 import scodec.bits._
+
 import scala.concurrent.duration._
 
 /**
@@ -49,7 +50,7 @@ object TestConstants {
 
   def sqliteInMemory() = DriverManager.getConnection("jdbc:sqlite::memory:")
 
-  def inMemoryDb(connection: Connection = sqliteInMemory()): Databases = Databases.databaseByConnections(connection, connection, connection, databaseDir = None)
+  def inMemoryDb(connection: Connection = sqliteInMemory()): Databases = Databases.databaseByConnections(connection, connection, connection, None)
 
 
   object Alice {
@@ -190,7 +191,7 @@ object TestConstants {
     data = DATA_NORMAL(
       commitments = Commitments(
         localParams = Alice.channelParams.copy(
-          channelKeyPath = KeyPath(Seq(1L, 2L, 3L, 4L, 5L)),
+          channelKeyPath = Left(KeyPath(Seq(1L, 2L, 3L, 4L, 5L))),
           defaultFinalScriptPubKey = hex"001459c9d053beb25049fd2d35d621f5c56fd4f2415d"
         ),
         remoteParams = RemoteParams(
@@ -202,10 +203,10 @@ object TestConstants {
           toSelfDelay = 720,
           maxAcceptedHtlcs = 30,
           fundingPubKey = PublicKey(hex"02184615bf2294acc075701892d7bd8aff28d78f84330e8931102e537c8dfe92a3"),
-          revocationBasepoint = Point(hex"020beeba2c3015509a16558c35b930bed0763465cf7a9a9bc4555fd384d8d383f6"),
-          paymentBasepoint = Point(hex"02e63d3b87e5269d96f1935563ca7c197609a35a928528484da1464eee117335c5"),
-          delayedPaymentBasepoint = Point(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281"),
-          htlcBasepoint = Point(hex"0274a89988063045d3589b162ac6eea5fa0343bf34220648e92a636b1c2468a434"),
+          revocationBasepoint = PublicKey(hex"020beeba2c3015509a16558c35b930bed0763465cf7a9a9bc4555fd384d8d383f6"),
+          paymentBasepoint = PublicKey(hex"02e63d3b87e5269d96f1935563ca7c197609a35a928528484da1464eee117335c5"),
+          delayedPaymentBasepoint = PublicKey(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281"),
+          htlcBasepoint = PublicKey(hex"0274a89988063045d3589b162ac6eea5fa0343bf34220648e92a636b1c2468a434"),
           globalFeatures = hex"00",
           localFeatures = hex"82"
         ),
@@ -259,7 +260,7 @@ object TestConstants {
             toRemoteMsat = 8000000000L
           ),
           txid = ByteVector32.fromValidHex("b70c3314af259029e7d11191ca0fe6ee407352dfaba59144df7f7ce5cc1c7b51"),
-          remotePerCommitmentPoint = Point(hex"0286f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")
+          remotePerCommitmentPoint = PublicKey(hex"0286f6253405605640f6c19ea85a51267795163183a17df077050bf680ed62c224")
         ),
         localChanges = LocalChanges(
           proposed = List.empty,
@@ -280,7 +281,7 @@ object TestConstants {
             amountMsatIn = 5001,
             amountMsatOut = 5000
           )),
-        remoteNextCommitInfo = Right(Point(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281")),
+        remoteNextCommitInfo = Right(PublicKey(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281")),
         commitInput = Transactions.InputInfo(
           outPoint = OutPoint(ByteVector32.fromValidHex("5db9046bbb432178e11a4471cbc73f155bd5e19cafdb8d99812a715d555cc763"), 1),
           txOut = TxOut(Satoshi(12000000), ByteVector.empty),
@@ -293,7 +294,7 @@ object TestConstants {
       buried = true,
       channelAnnouncement = None,
       channelUpdate = ChannelUpdate(
-        signature = ByteVector.empty,
+        signature = ByteVector64.Zeroes,
         chainHash = Alice.nodeParams.chainHash,
         shortChannelId = ShortChannelId("501x1x0"),
         timestamp = 1556526043L,

@@ -1776,11 +1776,6 @@ class Channel(val nodeParams: NodeParams, val wallet: EclairWallet, remoteNodeId
         context.system.eventStream.publish(ChannelStateChanged(self, context.parent, remoteNodeId, state, nextState, nextStateData))
       }
 
-      if(nextState == WAIT_FOR_FUNDING_CONFIRMED) {
-        log.info(s"Triggering static backup")
-        RecoveryTool.storeBackup(nodeParams, nextStateData.asInstanceOf[HasCommitments]) // create a static backup file for this channel, non blocking, fail-safe
-      }
-
       if (nextState == CLOSED) {
         // channel is closed, scheduling this actor for self destruction
         context.system.scheduler.scheduleOnce(10 seconds, self, 'shutdown)
