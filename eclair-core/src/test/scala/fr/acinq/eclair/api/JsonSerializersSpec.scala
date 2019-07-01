@@ -24,7 +24,7 @@ import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi, OutPoint, Transaction}
 import fr.acinq.eclair._
 import fr.acinq.eclair.payment.{PaymentRequest, PaymentSettlingOnChain}
 import fr.acinq.bitcoin.{ByteVector32, OutPoint}
-import fr.acinq.eclair.RecoveryTool.StaticBackup
+import fr.acinq.eclair.RecoveryTool.ChannelBackup
 import fr.acinq.eclair.api.JsonSupport.CustomTypeHints
 import fr.acinq.eclair.payment.PaymentRequest
 import fr.acinq.eclair.transactions.{IN, OUT}
@@ -40,7 +40,7 @@ class JsonSerializersSpec extends FunSuite with Matchers {
     import JsonSupport.serialization
     import JsonSupport.formats
 
-    val staticBackup = StaticBackup(
+    val staticBackup = ChannelBackup(
      ByteVector32.fromValidHex("c02b76d1fbb67c9c02b08a3ecde5d896874419dd324fa9d535f48209293b8bfa"),
       fundingOutputIndex = 0,
       isFunder = true,
@@ -49,12 +49,12 @@ class JsonSerializersSpec extends FunSuite with Matchers {
     )
 
     val serialized = serialization.write(staticBackup)
-    val deserializedBackup = serialization.read[StaticBackup](serialized)
+    val deserializedBackup = serialization.read[ChannelBackup](serialized)
     assert(staticBackup == deserializedBackup)
 
     val staticBackup1 = staticBackup.copy(remoteFundingPubkey_opt = Some(PublicKey(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281")))
     val serialized1 = serialization.write(staticBackup1)
-    val deserializedBackup1 = serialization.read[StaticBackup](serialized1)
+    val deserializedBackup1 = serialization.read[ChannelBackup](serialized1)
     assert(staticBackup1 == deserializedBackup1)
   }
 

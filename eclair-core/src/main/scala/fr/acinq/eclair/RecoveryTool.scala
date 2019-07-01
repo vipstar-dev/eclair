@@ -34,36 +34,26 @@ import fr.acinq.eclair.wire.ChannelUpdate
 
 object RecoveryTool extends Logging {
 
-  case class StaticBackup(fundingTxid: ByteVector32, fundingOutputIndex: Long, isFunder: Boolean, remoteNodeId: PublicKey, remoteFundingPubkey_opt:Option[PublicKey])
+  case class ChannelBackup(fundingTxid: ByteVector32, fundingOutputIndex: Long, isFunder: Boolean, remoteNodeId: PublicKey, remoteFundingPubkey_opt:Option[PublicKey])
 
   private lazy val scanner = new java.util.Scanner(System.in).useDelimiter("\\n")
 
   def interactiveRecovery(appKit: Kit): Unit = {
-
     print(s"\n ### Welcome to the eclair recovery tool ### \n")
-
     val nodeUri = getInput("Please insert the URI of the target node: ", NodeURI.parse(_))
-    if(!getInput("Do you have the backup y/n? ", getBoolInput)){
-      val shortId = getInput("Please insert the fund: ", ShortChannelId(_))
-      println(s"### Attempting channel recovery now - good luck! ###")
-      //doRecovery(appKit, shortId, nodeUri)
-    } else {
-      val backup = getInput("Please insert the absolute path of the backup file: ", path => {
-        val source = Source.fromFile(path)
-        val fileContent = source.mkString
-        val s = serialization.read[StaticBackup](fileContent)
-        source.close()
-        s
-      })
-      println(s"### Attempting channel recovery now - good luck! ###")
-      doRecovery(appKit, backup, nodeUri)
-    }
-
+    val backup = getInput("Please insert the absolute path of the backup file: ", path => {
+      val source = Source.fromFile(path)
+      val fileContent = source.mkString
+      val s = serialization.read[ChannelBackup](fileContent)
+      source.close()
+      s
+    })
+    println(s"### Attempting channel recovery now - good luck! ###")
+    doRecovery(appKit, backup, nodeUri)
   }
 
   def storeBackup(nodeParams: NodeParams, channelData: HasCommitments) = Future {
-
-    val backup = StaticBackup(
+    val backup = ChannelBackup(
       fundingTxid = channelData.commitments.commitInput.outPoint.txid,
       fundingOutputIndex = channelData.commitments.commitInput.outPoint.index,
       isFunder = channelData.commitments.localParams.isFunder,
@@ -83,17 +73,9 @@ object RecoveryTool extends Logging {
       val writer = new FileWriter(channelBackup)
       writer.write(serialization.writePretty(backup))
       writer.close()
-      logger.info(s"Created static backup: ${channelBackup.getAbsolutePath}")
+      logger.info(s"Created channel backup: ${channelBackup.getAbsolutePath}")
     }
 
-  }
-
-  private def getBoolInput = { in: String =>
-    in match {
-      case "y" | "yes" => true
-      case "n" | "no"  => false
-      case _ => throw new IllegalArgumentException("Please answer y/n")
-    }
   }
 
   private def getInput[T](msg: String, parse: String => T): T = {
@@ -108,10 +90,7 @@ object RecoveryTool extends Logging {
     throw new IllegalArgumentException("Unable to get input")
   }
 
-  // FUNDER = m/47'/2'/SHA256(funding_tx.input[0].outpoint)/0
-  // FUNDEE_0 = m/47'/2'/SHA256(blockchain_height || counter)/2
-  // FUNDEE_1 = m/47'/2'/SHA256(funding_tx.output[channel_output_index].scriptPubkey)/1
-  def doRecovery(appKit: Kit, backup: StaticBackup, uri: NodeURI): Future[Unit] = {
+  def doRecovery(appKit: Kit, backup: ChannelBackup, uri: NodeURI): Future[Unit] = {
 
     implicit val timeout = Timeout(10 minutes)
     implicit val shttp = OkHttpFutureBackend()

@@ -1784,7 +1784,7 @@ class Channel(val nodeParams: NodeParams, val wallet: EclairWallet, remoteNodeId
       }
 
       if(nextState == WAIT_FOR_FUNDING_CONFIRMED) {
-        log.info(s"Triggering static backup")
+        log.info(s"Triggering channel backup")
         RecoveryTool.storeBackup(nodeParams, nextStateData.asInstanceOf[HasCommitments]) // create a static backup file for this channel, non blocking, fail-safe
       }
 

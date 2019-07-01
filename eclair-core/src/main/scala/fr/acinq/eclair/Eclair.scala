@@ -37,7 +37,7 @@ import scala.concurrent.duration._
 import fr.acinq.eclair.payment.{PaymentReceived, PaymentRelayed, PaymentRequest, PaymentSent}
 import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, NodeAnnouncement}
 import TimestampQueryFilters._
-import fr.acinq.eclair.RecoveryTool.StaticBackup
+import fr.acinq.eclair.RecoveryTool.ChannelBackup
 
 case class GetInfoResponse(nodeId: PublicKey, alias: String, chainHash: ByteVector32, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 
@@ -107,9 +107,9 @@ trait Eclair {
 
   def getInfoResponse()(implicit timeout: Timeout): Future[GetInfoResponse]
 
-  def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup]
+  def getChannelBackup(channelId: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ChannelBackup]
 
-  def attemptChannelRecovery(backup: StaticBackup, uri: NodeURI)(implicit timeout: Timeout): Future[Unit]
+  def attemptChannelRecovery(backup: ChannelBackup, uri: NodeURI)(implicit timeout: Timeout): Future[Unit]
 }
 
 class EclairImpl(appKit: Kit) extends Eclair {
@@ -254,10 +254,10 @@ class EclairImpl(appKit: Kit) extends Eclair {
     appKit.nodeParams.db.payments.getPaymentRequest(paymentHash)
   }
 
-  override def getChannelBackup(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[StaticBackup] = {
+  override def getChannelBackup(channelIdentifier: Either[ByteVector32, ShortChannelId])(implicit timeout: Timeout): Future[ChannelBackup] = {
     sendToChannel(channelIdentifier, CMD_GETINFO).mapTo[RES_GETINFO].map { info =>
       val channelData = info.data.asInstanceOf[HasCommitments]
-      StaticBackup(
+      ChannelBackup(
         fundingTxid = channelData.channelId,
         fundingOutputIndex = channelData.commitments.commitInput.outPoint.index,
         isFunder = channelData.commitments.localParams.isFunder,
@@ -267,7 +267,7 @@ class EclairImpl(appKit: Kit) extends Eclair {
     }
   }
 
-  override def attemptChannelRecovery(backup: StaticBackup, uri: NodeURI)(implicit timeout: Timeout): Future[Unit] = {
+  override def attemptChannelRecovery(backup: ChannelBackup, uri: NodeURI)(implicit timeout: Timeout): Future[Unit] = {
     RecoveryTool.doRecovery(appKit, backup, uri)
   }
 

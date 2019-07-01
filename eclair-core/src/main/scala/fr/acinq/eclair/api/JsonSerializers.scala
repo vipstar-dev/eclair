@@ -24,7 +24,7 @@ import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport.ShouldWritePretty
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.{ByteVector32, ByteVector64, MilliSatoshi, OutPoint, Transaction}
-import fr.acinq.eclair.RecoveryTool.StaticBackup
+import fr.acinq.eclair.RecoveryTool.ChannelBackup
 import fr.acinq.eclair.channel.State
 import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.db.OutgoingPaymentStatus
@@ -176,13 +176,13 @@ class OutgoingPaymentStatusSerializer extends CustomSerializer[OutgoingPaymentSt
   case el: OutgoingPaymentStatus.Value => JString(el.toString)
 }))
 
-class StaticBackupSerializer extends CustomSerializer[StaticBackup](format => ({
+class StaticBackupSerializer extends CustomSerializer[ChannelBackup](format => ({
   case JObject(List(
       ("fundingTxid", JString(fundingTxid)),
       ("fundingOutputIndex", JInt(fundingOutputIndex)),
       ("isFunder", JBool(isFunder)),
       ("remoteNodeId", JString(remoteNodeId))
-    )) => StaticBackup(
+    )) => ChannelBackup(
             fundingTxid = ByteVector32.fromValidHex(fundingTxid),
             fundingOutputIndex = fundingOutputIndex.longValue(),
             isFunder = isFunder,
@@ -195,14 +195,14 @@ class StaticBackupSerializer extends CustomSerializer[StaticBackup](format => ({
       ("isFunder", JBool(isFunder)),
       ("remoteNodeId", JString(remoteNodeId)),
       ("remoteFundingPubkey", JString(remoteFundingPubkey))
-    )) => StaticBackup(
+    )) => ChannelBackup(
             fundingTxid = ByteVector32.fromValidHex(fundingTxid),
             fundingOutputIndex = fundingOutputIndex.longValue(),
             isFunder = isFunder,
             remoteNodeId = PublicKey(ByteVector.fromValidHex(remoteNodeId)),
             remoteFundingPubkey_opt = Some(PublicKey(ByteVector.fromValidHex(remoteFundingPubkey))))
 }, {
-  case backup:StaticBackup =>
+  case backup:ChannelBackup =>
     val fields = List(
       ("fundingTxid", JString(backup.fundingTxid.toHex)),
       ("fundingOutputIndex", JInt(backup.fundingOutputIndex)),
