@@ -33,6 +33,7 @@ import akka.util.Timeout
 import com.google.common.net.HostAndPort
 import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.api.FormParamExtractors._
 import fr.acinq.eclair.api.JsonSupport.CustomTypeHints
 import fr.acinq.eclair.io.NodeURI
@@ -282,9 +283,14 @@ trait Service extends ExtraDirectives with Logging {
                       path("channelstats") {
                         complete(eclairApi.channelStats())
                       } ~
+                      path("backup") {
+                        withChannelIdentifier { channelIdentifier =>
+                          complete(eclairApi.getChannelBackup(channelIdentifier))
+                        }
+                      } ~
                       path("recovery") {
-                        formFields("txid".as[String]) { fundingTxid =>
-                          complete("")
+                        formFields("backup".as[StaticBackup](genericUnmarshaller[StaticBackup]), "uri".as[NodeURI]) { (backup, uri) =>
+                          complete(eclairApi.attemptChannelRecovery(backup, uri))
                         }
                       }
                   } ~ get {

@@ -57,6 +57,13 @@ class ExtendedBitcoinClient(val rpcClient: BitcoinJsonRPCClient) {
       case JString(b) => Block.read(b)
     }
 
+  def getBlockHeight(blockHash: ByteVector32)(implicit ec: ExecutionContext): Future[Long] =
+    rpcClient.invoke("getblock", blockHash.toHex, 1)
+      .map(json => json \ "height")
+      .collect {
+        case JInt(height) => height.longValue()
+    }
+
   def lookForSpendingTx(blockhash_opt: Option[String], txid: String, outputIndex: Int)(implicit ec: ExecutionContext): Future[Transaction] =
     for {
       blockhash <- blockhash_opt match {

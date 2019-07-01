@@ -19,7 +19,7 @@ package fr.acinq.eclair.channel
 import akka.actor.{ActorRef, FSM, OneForOneStrategy, Props, Status, SupervisorStrategy}
 import akka.event.Logging.MDC
 import akka.pattern.pipe
-import fr.acinq.bitcoin.Crypto.{PublicKey, PrivateKey, sha256}
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin._
 import fr.acinq.eclair._
 import fr.acinq.eclair.blockchain._
@@ -30,8 +30,10 @@ import fr.acinq.eclair.payment._
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.transactions._
 import fr.acinq.eclair.wire.{ChannelReestablish, _}
+import grizzled.slf4j.Logging
 import scodec.bits.ByteVector
 import scodec.bits._
+
 import scala.compat.Platform
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
@@ -42,7 +44,7 @@ import scala.util.{Failure, Success, Try}
   * Created by PM on 20/08/2015.
   */
 
-object Channel {
+object Channel extends Logging {
   def props(nodeParams: NodeParams, wallet: EclairWallet, remoteNodeId: PublicKey, blockchain: ActorRef, router: ActorRef, relayer: ActorRef, origin_opt: Option[ActorRef]) = Props(new Channel(nodeParams, wallet, remoteNodeId, blockchain, router, relayer, origin_opt))
 
   // see https://github.com/lightningnetwork/lightning-rfc/blob/master/07-routing-gossip.md#requirements
@@ -102,6 +104,11 @@ object Channel {
     val publicKeyPath = LocalKeyManager.makeChannelKeyPathFundeePubkey(blockHeight, counter)
     val localFundingPubkey = nodeParams.keyManager.fundingPublicKey(publicKeyPath).publicKey
     val fundingPubkeyScript = Script.write(Script.pay2wsh(Scripts.multiSig2of2(localFundingPubkey, open.fundingPubkey)))
+    logger.info(s"BLOCK_HEIGHT=$blockHeight  COUNTER=$counter")
+    logger.info(s"LOCALFUNDING_KEY=$localFundingPubkey")
+    logger.info(s"REMOTEFUNDING_KEY=${open.fundingPubkey}")
+    logger.info(s"FUNDING_SCRIPTPUBKEY=${fundingPubkeyScript.toHex}")
+
     val channelKeyPath = LocalKeyManager.makeChannelKeyPathFundee(fundingPubkeyScript)
     val channelKeyPaths = KeyPathFundee(publicKeyPath, channelKeyPath)
     makeChannelParams(nodeParams, defaultFinalScriptPubKey, fundingSatoshis, Right(channelKeyPaths))
@@ -1774,6 +1781,11 @@ class Channel(val nodeParams: NodeParams, val wallet: EclairWallet, remoteNodeId
     case state -> nextState =>
       if (state != nextState) {
         context.system.eventStream.publish(ChannelStateChanged(self, context.parent, remoteNodeId, state, nextState, nextStateData))
+      }
+
+      if(nextState == WAIT_FOR_FUNDING_CONFIRMED) {
+        log.info(s"Triggering static backup")
+        RecoveryTool.storeBackup(nodeParams, nextStateData.asInstanceOf[HasCommitments]) // create a static backup file for this channel, non blocking, fail-safe
       }
 
       if (nextState == CLOSED) {

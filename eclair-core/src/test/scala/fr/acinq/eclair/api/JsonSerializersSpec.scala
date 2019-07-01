@@ -20,11 +20,11 @@ import java.net.InetAddress
 import java.util.UUID
 
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi, OutPoint, Transaction}
 import fr.acinq.eclair._
 import fr.acinq.eclair.payment.{PaymentRequest, PaymentSettlingOnChain}
 import fr.acinq.bitcoin.{ByteVector32, OutPoint}
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.api.JsonSupport.CustomTypeHints
 import fr.acinq.eclair.payment.PaymentRequest
 import fr.acinq.eclair.transactions.{IN, OUT}
@@ -34,6 +34,29 @@ import org.scalatest.{FunSuite, Matchers}
 import scodec.bits._
 
 class JsonSerializersSpec extends FunSuite with Matchers {
+
+  test("serialize/deserialize a static backup") {
+
+    import JsonSupport.serialization
+    import JsonSupport.formats
+
+    val staticBackup = StaticBackup(
+     ByteVector32.fromValidHex("c02b76d1fbb67c9c02b08a3ecde5d896874419dd324fa9d535f48209293b8bfa"),
+      fundingOutputIndex = 0,
+      isFunder = true,
+      remoteNodeId = PublicKey(hex"0318fdfc5fd8165e8258f1fd9468b8b19ba711a9acad7f113db3a8db94614bfe97"),
+      None
+    )
+
+    val serialized = serialization.write(staticBackup)
+    val deserializedBackup = serialization.read[StaticBackup](serialized)
+    assert(staticBackup == deserializedBackup)
+
+    val staticBackup1 = staticBackup.copy(remoteFundingPubkey_opt = Some(PublicKey(hex"033dea641e24e7ae550f7c3a94bd9f23d55b26a649c79cd4a3febdf912c6c08281")))
+    val serialized1 = serialization.write(staticBackup1)
+    val deserializedBackup1 = serialization.read[StaticBackup](serialized1)
+    assert(staticBackup1 == deserializedBackup1)
+  }
 
   test("deserialize Map[OutPoint, ByteVector]") {
     val output1 = OutPoint(ByteVector32(hex"11418a2d282a40461966e4f578e1fdf633ad15c1b7fb3e771d14361127233be1"), 0)

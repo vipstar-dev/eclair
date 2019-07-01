@@ -135,5 +135,10 @@ class ExtendedBitcoinClientSpec extends TestKit(ActorSystem("test")) with Bitcoi
     client.getBlock(blockHash).pipeTo(sender.ref)
     val tip = sender.expectMsgType[Block]
     assert(tip.blockId == blockHash)
+
+    // ask for blockHeight by hash
+    client.getBlockHeight(blockHash).pipeTo(sender.ref)
+    val height = sender.expectMsgType[Long]
+    assert(height == tipHeight)
   }
 }

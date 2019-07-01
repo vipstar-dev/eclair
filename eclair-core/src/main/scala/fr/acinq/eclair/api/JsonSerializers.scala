@@ -24,6 +24,7 @@ import de.heikoseeberger.akkahttpjson4s.Json4sSupport
 import de.heikoseeberger.akkahttpjson4s.Json4sSupport.ShouldWritePretty
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.{ByteVector32, ByteVector64, MilliSatoshi, OutPoint, Transaction}
+import fr.acinq.eclair.RecoveryTool.StaticBackup
 import fr.acinq.eclair.channel.State
 import fr.acinq.eclair.crypto.ShaChain
 import fr.acinq.eclair.db.OutgoingPaymentStatus
@@ -175,6 +176,45 @@ class OutgoingPaymentStatusSerializer extends CustomSerializer[OutgoingPaymentSt
   case el: OutgoingPaymentStatus.Value => JString(el.toString)
 }))
 
+class StaticBackupSerializer extends CustomSerializer[StaticBackup](format => ({
+  case JObject(List(
+      ("fundingTxid", JString(fundingTxid)),
+      ("fundingOutputIndex", JInt(fundingOutputIndex)),
+      ("isFunder", JBool(isFunder)),
+      ("remoteNodeId", JString(remoteNodeId))
+    )) => StaticBackup(
+            fundingTxid = ByteVector32.fromValidHex(fundingTxid),
+            fundingOutputIndex = fundingOutputIndex.longValue(),
+            isFunder = isFunder,
+            remoteNodeId = PublicKey(ByteVector.fromValidHex(remoteNodeId)),
+            remoteFundingPubkey_opt = None)
+
+  case JObject(List(
+      ("fundingTxid", JString(fundingTxid)),
+      ("fundingOutputIndex", JInt(fundingOutputIndex)),
+      ("isFunder", JBool(isFunder)),
+      ("remoteNodeId", JString(remoteNodeId)),
+      ("remoteFundingPubkey", JString(remoteFundingPubkey))
+    )) => StaticBackup(
+            fundingTxid = ByteVector32.fromValidHex(fundingTxid),
+            fundingOutputIndex = fundingOutputIndex.longValue(),
+            isFunder = isFunder,
+            remoteNodeId = PublicKey(ByteVector.fromValidHex(remoteNodeId)),
+            remoteFundingPubkey_opt = Some(PublicKey(ByteVector.fromValidHex(remoteFundingPubkey))))
+}, {
+  case backup:StaticBackup =>
+    val fields = List(
+      ("fundingTxid", JString(backup.fundingTxid.toHex)),
+      ("fundingOutputIndex", JInt(backup.fundingOutputIndex)),
+      ("isFunder", JBool(backup.isFunder)),
+      ("remoteNodeId", JString(backup.remoteNodeId.value.toHex)))
+
+    val remoteFundingPubkey_opt: Option[(String, JValue)] = backup.remoteFundingPubkey_opt.map { remoteFundingPubkey =>
+      ("remoteFundingPubkey", JString(remoteFundingPubkey.value.toHex))
+    }
+
+    JObject(fields ++ remoteFundingPubkey_opt.toSeq)
+}))
 
 object JsonSupport extends Json4sSupport {
 
@@ -205,7 +245,8 @@ object JsonSupport extends Json4sSupport {
     new DirectionSerializer +
     new PaymentRequestSerializer +
     new JavaUUIDSerializer +
-    new OutgoingPaymentStatusSerializer
+    new OutgoingPaymentStatusSerializer +
+    new StaticBackupSerializer
 
   implicit val shouldWritePretty: ShouldWritePretty = ShouldWritePretty.True
 
