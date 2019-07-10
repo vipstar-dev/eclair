@@ -19,16 +19,13 @@ package fr.acinq.eclair.wire
 import fr.acinq.eclair.UInt64
 import scodec.bits.ByteVector
 
-import scala.annotation.tailrec
-
 /**
   * Created by t-bast on 20/06/2019.
   */
 
 // @formatter:off
-trait Tlv {
-  val `type`: UInt64
-}
+trait Tlv
+
 sealed trait OnionTlv extends Tlv
 // @formatter:on
 
@@ -47,17 +44,4 @@ case class GenericTlv(`type`: UInt64, value: ByteVector) extends Tlv
   *
   * @param records tlv records.
   */
-case class TlvStream(records: Seq[Tlv]) {
-
-  records.foldLeft(Option.empty[Tlv]) {
-    case (None, record) =>
-      require(!record.isInstanceOf[GenericTlv] || record.`type`.toBigInt % 2 != 0, "tlv streams must not contain unknown even tlv types")
-      Some(record)
-    case (Some(previousRecord), record) =>
-      require(record.`type` != previousRecord.`type`, "tlv streams must not contain duplicate records")
-      require(record.`type` > previousRecord.`type`, "tlv records must be ordered by monotonically-increasing types")
-      require(!record.isInstanceOf[GenericTlv] || record.`type`.toBigInt % 2 != 0, "tlv streams must not contain unknown even tlv types")
-      Some(record)
-  }
-
-}
+case class TlvStream(records: Seq[Tlv])

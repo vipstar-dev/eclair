@@ -17,14 +17,14 @@
 package fr.acinq.eclair.wire
 
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.eclair.{ShortChannelId, UInt64}
 import fr.acinq.eclair.UInt64.Conversions._
 import fr.acinq.eclair.wire.CommonCodecs.{publicKey, shortchannelid, uint64, varint}
 import fr.acinq.eclair.wire.TlvCodecs._
+import fr.acinq.eclair.{ShortChannelId, UInt64}
 import org.scalatest.FunSuite
-import scodec.bits.HexStringSyntax
-import scodec.codecs._
 import scodec.Codec
+import scodec.bits.{ByteVector, HexStringSyntax}
+import scodec.codecs._
 
 /**
   * Created by t-bast on 20/06/2019.
@@ -82,11 +82,16 @@ class TlvCodecsSpec extends FunSuite {
     }
   }
 
-  test("create invalid tlv stream") {
-    assertThrows[IllegalArgumentException](TlvStream(Seq(GenericTlv(42, hex"2a")))) // unknown even type
-    assertThrows[IllegalArgumentException](TlvStream(Seq(TestType1(561), TestType2(ShortChannelId(1105)), GenericTlv(42, hex"2a")))) // unknown even type
-    assertThrows[IllegalArgumentException](TlvStream(Seq(TestType1(561), TestType1(1105)))) // duplicate type
-    assertThrows[IllegalArgumentException](TlvStream(Seq(TestType2(ShortChannelId(1105)), TestType1(561)))) // invalid ordering
+  test("encode invalid tlv stream") {
+    val testCases = Seq(
+      TlvStream(Seq(GenericTlv(42, hex"2a"))), // unknown even type
+      TlvStream(Seq(TestType1(561), TestType2(ShortChannelId(1105)), GenericTlv(42, hex"2a"))), // unknown even type
+      TlvStream(Seq(TestType1(561), TestType1(1105))), // duplicate type
+      TlvStream(Seq(TestType2(ShortChannelId(1105)), TestType1(561))) // invalid ordering
+    )
+    for (testCase <- testCases) {
+      assert(tlvStream(testTlvCodec).encode(testCase).isFailure, testCase)
+    }
   }
 
   test("encoded/decode empty tlv stream") {
@@ -154,10 +159,10 @@ object TlvCodecsSpec {
 
   // @formatter:off
   sealed trait TestTlv extends Tlv
-  case class TestType1(uintValue: UInt64) extends TestTlv { override val `type` = UInt64(1) }
-  case class TestType2(shortChannelId: ShortChannelId) extends TestTlv { override val `type` = UInt64(2) }
-  case class TestType3(nodeId: PublicKey, value1: UInt64, value2: UInt64) extends TestTlv { override val `type` = UInt64(3) }
-  case class TestType13(intValue: Int) extends TestTlv { override val `type` = UInt64(13) }
+  case class TestType1(uintValue: UInt64) extends TestTlv { val `type` = UInt64(1) }
+  case class TestType2(shortChannelId: ShortChannelId) extends TestTlv { val `type` = UInt64(2) }
+  case class TestType3(nodeId: PublicKey, value1: UInt64, value2: UInt64) extends TestTlv { val `type` = UInt64(3) }
+  case class TestType13(intValue: Int) extends TestTlv { val `type` = UInt64(13) }
 
   val testCodec1: Codec[TestType1] = (("length" | constant(hex"08")) :: ("value" | uint64)).as[TestType1]
   val testCodec2: Codec[TestType2] = (("length" | constant(hex"08")) :: ("short_channel_id" | shortchannelid)).as[TestType2]
@@ -170,8 +175,8 @@ object TlvCodecsSpec {
     .typecase(13, testCodec13)
 
   sealed trait OtherTlv extends Tlv
-  case class OtherType1(uintValue: UInt64) extends OtherTlv { override val `type` = UInt64(10) }
-  case class OtherType2(smallValue: Long) extends OtherTlv { override val `type` = UInt64(11) }
+  case class OtherType1(uintValue: UInt64) extends OtherTlv { val `type` = UInt64(10) }
+  case class OtherType2(smallValue: Long) extends OtherTlv { val `type` = UInt64(11) }
 
   val otherCodec1: Codec[OtherType1] = (("length" | constant(hex"08")) :: ("value" | uint64)).as[OtherType1]
   val otherCodec2: Codec[OtherType2] = (("length" | constant(hex"04")) :: ("value" | uint32)).as[OtherType2]
