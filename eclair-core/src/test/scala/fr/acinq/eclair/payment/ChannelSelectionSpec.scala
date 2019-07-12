@@ -16,14 +16,14 @@
 
 package fr.acinq.eclair.payment
 
-import fr.acinq.bitcoin.{Block, ByteVector32}
 import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoin.{Block, ByteVector32}
 import fr.acinq.eclair.channel.{CMD_ADD_HTLC, CMD_FAIL_HTLC}
+import fr.acinq.eclair.payment.HtlcGenerationSpec.makeCommitments
 import fr.acinq.eclair.payment.Relayer.{OutgoingChannel, RelayFailure, RelayPayload, RelaySuccess}
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{ShortChannelId, TestConstants, randomBytes32, randomKey}
-import fr.acinq.eclair.payment.HtlcGenerationSpec.makeCommitments
 import org.scalatest.FunSuite
 
 import scala.collection.mutable
@@ -39,7 +39,7 @@ class ChannelSelectionSpec extends FunSuite {
   test("convert to CMD_FAIL_HTLC/CMD_ADD_HTLC") {
     val relayPayload = RelayPayload(
       add = UpdateAddHtlc(randomBytes32, 42, 1000000, randomBytes32, 70, TestConstants.emptyOnionPacket),
-      payload = PerHopPayload(ShortChannelId(12345), amtToForward = 998900, outgoingCltvValue = 60),
+      payload = OnionForwardInfo(ShortChannelId(12345), amtToForward = 998900, outgoingCltvValue = 60),
       nextPacket = TestConstants.emptyOnionPacket // just a placeholder
     )
 
@@ -52,7 +52,7 @@ class ChannelSelectionSpec extends FunSuite {
     // no channel_update
     assert(Relayer.relayOrFail(relayPayload, channelUpdate_opt = None) === RelayFailure(CMD_FAIL_HTLC(relayPayload.add.id, Right(UnknownNextPeer), commit = true)))
     // channel disabled
-    val channelUpdate_disabled = channelUpdate.copy(channelFlags = Announcements.makeChannelFlags(true, enable = false))
+    val channelUpdate_disabled = channelUpdate.copy(channelFlags = Announcements.makeChannelFlags(isNode1 = true, enable = false))
     assert(Relayer.relayOrFail(relayPayload, Some(channelUpdate_disabled)) === RelayFailure(CMD_FAIL_HTLC(relayPayload.add.id, Right(ChannelDisabled(channelUpdate_disabled.messageFlags, channelUpdate_disabled.channelFlags, channelUpdate_disabled)), commit = true)))
     // amount too low
     val relayPayload_toolow = relayPayload.copy(payload = relayPayload.payload.copy(amtToForward = 99))
@@ -72,7 +72,7 @@ class ChannelSelectionSpec extends FunSuite {
 
     val relayPayload = RelayPayload(
       add = UpdateAddHtlc(randomBytes32, 42, 1000000, randomBytes32, 70, TestConstants.emptyOnionPacket),
-      payload = PerHopPayload(ShortChannelId(12345), amtToForward = 998900, outgoingCltvValue = 60),
+      payload = OnionForwardInfo(ShortChannelId(12345), amtToForward = 998900, outgoingCltvValue = 60),
       nextPacket = TestConstants.emptyOnionPacket // just a placeholder
     )
 

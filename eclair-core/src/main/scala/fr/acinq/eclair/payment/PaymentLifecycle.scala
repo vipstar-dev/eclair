@@ -32,7 +32,6 @@ import fr.acinq.eclair.wire._
 import scodec.Attempt
 import scodec.bits.ByteVector
 
-import concurrent.duration._
 import scala.compat.Platform
 import scala.util.{Failure, Success}
 
@@ -185,7 +184,7 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
     case Event(_: TransportHandler.ReadAck, _) => stay // ignored, router replies with this when we forward a channel_update
   }
 
-  def reply(to: ActorRef, e: PaymentResult) = {
+  def reply(to: ActorRef, e: PaymentResult): Unit = {
     to ! e
     context.system.eventStream.publish(e)
   }
@@ -232,11 +231,11 @@ object PaymentLifecycle {
   // @formatter:on
 
 
-  def buildOnion(nodes: Seq[PublicKey], payloads: Seq[PerHopPayload], associatedData: ByteVector32): Sphinx.PacketAndSecrets = {
+  def buildOnion(nodes: Seq[PublicKey], payloads: Seq[OnionForwardInfo], associatedData: ByteVector32): Sphinx.PacketAndSecrets = {
     require(nodes.size == payloads.size)
     val sessionKey = randomKey
     val payloadsbin: Seq[ByteVector] = payloads
-      .map(OnionCodecs.perHopPayloadCodec.encode)
+      .map(OnionCodecs.legacyPerHopPayloadCodec.encode)
       .map {
         case Attempt.Successful(bitVector) => bitVector.toByteVector
         case Attempt.Failure(cause) => throw new RuntimeException(s"serialization error: $cause")
@@ -254,11 +253,11 @@ object PaymentLifecycle {
     *         - firstExpiry is the cltv expiry for the first htlc in the route
     *         - a sequence of payloads that will be used to build the onion
     */
-  def buildPayloads(finalAmountMsat: Long, finalExpiry: Long, hops: Seq[Hop]): (Long, Long, Seq[PerHopPayload]) =
-    hops.reverse.foldLeft((finalAmountMsat, finalExpiry, PerHopPayload(ShortChannelId(0L), finalAmountMsat, finalExpiry) :: Nil)) {
+  def buildPayloads(finalAmountMsat: Long, finalExpiry: Long, hops: Seq[Hop]): (Long, Long, Seq[OnionForwardInfo]) =
+    hops.reverse.foldLeft((finalAmountMsat, finalExpiry, OnionForwardInfo(ShortChannelId(0L), finalAmountMsat, finalExpiry) :: Nil)) {
       case ((msat, expiry, payloads), hop) =>
         val nextFee = nodeFee(hop.lastUpdate.feeBaseMsat, hop.lastUpdate.feeProportionalMillionths, msat)
-        (msat + nextFee, expiry + hop.lastUpdate.cltvExpiryDelta, PerHopPayload(hop.lastUpdate.shortChannelId, msat, expiry) +: payloads)
+        (msat + nextFee, expiry + hop.lastUpdate.cltvExpiryDelta, OnionForwardInfo(hop.lastUpdate.shortChannelId, msat, expiry) +: payloads)
     }
 
   def buildCommand(id: UUID, finalAmountMsat: Long, finalExpiry: Long, paymentHash: ByteVector32, hops: Seq[Hop]): (CMD_ADD_HTLC, Seq[(ByteVector32, PublicKey)]) = {
@@ -294,9 +293,7 @@ object PaymentLifecycle {
     * This method retrieves the channel update that we used when we built a route.
     *
     * It just iterates over the hops, but there are at most 20 of them.
-    *
-    * @param nodeId
-    * @param hops
+
     * @return the channel update if found
     */
   def getChannelUpdateForNode(nodeId: PublicKey, hops: Seq[Hop]): Option[ChannelUpdate] = hops.find(_.nodeId == nodeId).map(_.lastUpdate)
@@ -304,10 +301,6 @@ object PaymentLifecycle {
   /**
     * This allows us to detect if a bad node always answers with a new update (e.g. with a slightly different expiry or fee)
     * in order to mess with us.
-    *
-    * @param nodeId
-    * @param failures
-    * @return
     */
   def hasAlreadyFailedOnce(nodeId: PublicKey, failures: Seq[PaymentFailure]): Boolean =
     failures
