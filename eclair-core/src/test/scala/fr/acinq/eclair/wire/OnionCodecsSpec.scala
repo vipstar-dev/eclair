@@ -79,7 +79,7 @@ class OnionCodecsSpec extends FunSuite {
     val testCases = Map(
       TlvStream[OnionTlv]() -> hex"00",
       TlvStream[OnionTlv](AmountToForward(561), OutgoingCltv(42), OutgoingChannelId(ShortChannelId(1105))) -> hex"11 02020231 04012a 06080000000000000451",
-      TlvStream[OnionTlv](Seq(AmountToForward(561), OutgoingCltv(42)), Seq(GenericTlv(65535, hex"06c1"))) -> hex"0d 02020231 04012a fdffff0206c1"
+      TlvStream[OnionTlv](Seq(AmountToForward(561), OutgoingCltv(42), MultiPartPayment(1105)), Seq(GenericTlv(65535, hex"06c1"))) -> hex"11 02020231 04012a 08020451 fdffff0206c1"
     )
 
     for ((expected, bin) <- testCases) {

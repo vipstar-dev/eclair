@@ -93,6 +93,13 @@ object OnionTlv {
     */
   case class OutgoingChannelId(shortChannelId: ShortChannelId) extends OnionTlv
 
+  /**
+    * Indicates to the final destination node that this payment is part of a multi-part payment.
+    *
+    * @param totalAmountMsat is the total amount that the recipient should expect from the multi-part payment.
+    */
+  case class MultiPartPayment(totalAmountMsat: Long) extends OnionTlv
+
 }
 
 object OnionCodecs {
@@ -120,10 +127,13 @@ object OnionCodecs {
 
   private val outgoingChannelId: Codec[OutgoingChannelId] = (("length" | constant(hex"08")) :: ("short_channel_id" | shortchannelid)).as[OutgoingChannelId]
 
+  private val multiPartPayment: Codec[MultiPartPayment] = ("total_amount_msat" | tu64overflow).as[MultiPartPayment]
+
   private val onionTlvCodec = discriminated[OnionTlv].by(varint)
     .typecase(UInt64(2), amountToForward)
     .typecase(UInt64(4), outgoingCltv)
     .typecase(UInt64(6), outgoingChannelId)
+    .typecase(UInt64(8), multiPartPayment)
 
   val tlvPerHopPayloadCodec: Codec[TlvStream[OnionTlv]] = TlvCodecs.lengthPrefixedTlvStream[OnionTlv](onionTlvCodec).complete
 
