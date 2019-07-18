@@ -16,15 +16,15 @@
 
 package fr.acinq.eclair.payment
 
-import akka.actor.Status.Failure
 import akka.actor.ActorSystem
+import akka.actor.Status.Failure
 import akka.testkit.{TestActorRef, TestKit, TestProbe}
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
 import fr.acinq.eclair.TestConstants.Alice
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC}
-import fr.acinq.eclair.payment.PaymentLifecycle.ReceivePayment
+import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, ReceivePayment}
 import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
-import fr.acinq.eclair.wire.{FinalExpiryTooSoon, UpdateAddHtlc}
+import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{Globals, ShortChannelId, TestConstants, randomKey}
 import org.scalatest.FunSuiteLike
 import scodec.bits.ByteVector
@@ -55,7 +55,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
       assert(!nodeParams.db.payments.getPendingPaymentRequestAndPreimage(pr.paymentHash).get._2.isExpired)
 
       val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, amountMsat.amount, pr.paymentHash, expiry, TestConstants.emptyOnionPacket)
-      sender.send(handler, add)
+      sender.send(handler, DecryptedHtlc(add, OnionForwardInfo(ShortChannelId(1), add.amountMsat, add.cltvExpiry)))
       sender.expectMsgType[CMD_FULFILL_HTLC]
 
       val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
@@ -64,12 +64,13 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
     }
 
     {
-      sender.send(handler, ReceivePayment(Some(amountMsat), "another coffee"))
+      sender.send(handler, ReceivePayment(Some(amountMsat), "another coffee with multi-part", allowMultiPart = true))
       val pr = sender.expectMsgType[PaymentRequest]
+      assert(pr.features.allowMultiPart)
       assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
 
       val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, amountMsat.amount, pr.paymentHash, expiry, TestConstants.emptyOnionPacket)
-      sender.send(handler, add)
+      sender.send(handler, DecryptedHtlc(add, OnionForwardInfo(ShortChannelId(1), add.amountMsat, add.cltvExpiry)))
       sender.expectMsgType[CMD_FULFILL_HTLC]
       val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
       assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(amountMsat, add.paymentHash, add.channelId, timestamp = 0))
@@ -82,14 +83,14 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
       assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
 
       val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, amountMsat.amount, pr.paymentHash, cltvExpiry = Globals.blockCount.get() + 3, TestConstants.emptyOnionPacket)
-      sender.send(handler, add)
+      sender.send(handler, DecryptedHtlc(add, OnionForwardInfo(ShortChannelId(1), add.amountMsat, add.cltvExpiry)))
       assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(FinalExpiryTooSoon))
       eventListener.expectNoMsg(300 milliseconds)
       assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
     }
   }
 
-  test("Payment request generation should fail when the amount asked in not valid") {
+  test("Payment request generation should fail when the amount is not valid") {
     val nodeParams = Alice.nodeParams
     val handler = system.actorOf(LocalPaymentHandler.props(nodeParams))
     val sender = TestProbe()
@@ -165,9 +166,95 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
     val pr = sender.expectMsgType[PaymentRequest]
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, amountMsat.amount, pr.paymentHash, expiry, TestConstants.emptyOnionPacket)
-    sender.send(handler, add)
+    sender.send(handler, DecryptedHtlc(add, OnionForwardInfo(ShortChannelId(1), add.amountMsat, add.cltvExpiry)))
 
     sender.expectMsgType[CMD_FAIL_HTLC]
     assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
   }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment if the payment request does not allow it") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "no multi-part support"))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(!pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+  }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment if the payment request is expired") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "multi-part expired", expirySeconds_opt = Some(0), allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+    assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
+  }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment with an invalid expiry") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "multi-part invalid expiry", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 1, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(FinalExpiryTooSoon))
+  }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment with an unknown payment hash") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "multi-part unknown payment hash", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash.reverse, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+  }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment with a total amount too low") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "multi-part total amount too low", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(999))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(999)))
+  }
+
+  test("LocalPaymentHandler should reject incoming multi-part payment with a total amount too high") {
+    val nodeParams = Alice.nodeParams
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "multi-part total amount too low", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+    assert(pr.features.allowMultiPart)
+
+    val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(2001))))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(2001)))
+  }
+
 }

@@ -20,13 +20,12 @@ import akka.actor.{Actor, ActorLogging, Props, Status}
 import fr.acinq.bitcoin.{Crypto, MilliSatoshi}
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC, Channel}
 import fr.acinq.eclair.db.IncomingPayment
-import fr.acinq.eclair.payment.PaymentLifecycle.ReceivePayment
+import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, ReceivePayment}
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{Globals, NodeParams, randomBytes32}
-import concurrent.duration._
+
 import scala.compat.Platform
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
 /**
@@ -38,17 +37,24 @@ import scala.util.{Failure, Success, Try}
   */
 class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLogging {
 
+  import LocalPaymentHandler._
+
   implicit val ec: ExecutionContext = context.system.dispatcher
   val paymentDb = nodeParams.db.payments
 
   override def receive: Receive = {
 
-    case ReceivePayment(amount_opt, desc, expirySeconds_opt, extraHops, fallbackAddress_opt, paymentPreimage_opt) =>
+    case ReceivePayment(amount_opt, desc, expirySeconds_opt, extraHops, fallbackAddress_opt, paymentPreimage_opt, allowMultiPart) =>
       Try {
         val paymentPreimage = paymentPreimage_opt.getOrElse(randomBytes32)
         val paymentHash = Crypto.sha256(paymentPreimage)
         val expirySeconds = expirySeconds_opt.getOrElse(nodeParams.paymentRequestExpiry.toSeconds)
-        val paymentRequest = PaymentRequest(nodeParams.chainHash, amount_opt, paymentHash, nodeParams.privateKey, desc, fallbackAddress_opt, expirySeconds = Some(expirySeconds), extraHops = extraHops)
+        val features = if (allowMultiPart) {
+          Some(PaymentRequest.Features(PaymentRequest.Features.BASIC_MULTI_PART_PAYMENT_OPTIONAL))
+        } else {
+          None
+        }
+        val paymentRequest = PaymentRequest(nodeParams.chainHash, amount_opt, paymentHash, nodeParams.privateKey, desc, fallbackAddress_opt, expirySeconds = Some(expirySeconds), extraHops = extraHops, features = features)
         log.debug(s"generated payment request={} from amount={}", PaymentRequest.write(paymentRequest), amount_opt)
         paymentDb.addPaymentRequest(paymentRequest, paymentPreimage)
         paymentRequest
@@ -57,33 +63,52 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
         case Failure(exception) => sender ! Status.Failure(exception)
       }
 
-    case htlc: UpdateAddHtlc =>
+    case DecryptedHtlc(htlc, perHop) =>
       paymentDb.getPendingPaymentRequestAndPreimage(htlc.paymentHash) match {
-        case Some((paymentPreimage, paymentRequest)) =>
-          val minFinalExpiry = Globals.blockCount.get() + paymentRequest.minFinalCltvExpiry.getOrElse(Channel.MIN_CLTV_EXPIRY)
-          // The htlc amount must be equal or greater than the requested amount. A slight overpaying is permitted, however
-          // it must not be greater than two times the requested amount.
-          // see https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#failure-messages
-          paymentRequest.amount match {
-            case _ if paymentRequest.isExpired =>
-              sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(htlc.amountMsat)), commit = true)
-            case _ if htlc.cltvExpiry < minFinalExpiry =>
-              sender ! CMD_FAIL_HTLC(htlc.id, Right(FinalExpiryTooSoon), commit = true)
-            case Some(amount) if MilliSatoshi(htlc.amountMsat) < amount =>
-              log.warning(s"received payment with amount too small for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat}")
-              sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(htlc.amountMsat)), commit = true)
-            case Some(amount) if MilliSatoshi(htlc.amountMsat) > amount * 2 =>
-              log.warning(s"received payment with amount too large for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat}")
-              sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(htlc.amountMsat)), commit = true)
-            case _ =>
+        case Some((paymentPreimage, paymentRequest)) => validatePayment(paymentRequest, htlc, perHop) match {
+          case Some(failure) => sender ! failure
+          case None => multiPartTotalAmount(perHop) match {
+            case Some(totalAmountMsat) =>
+              log.info(s"received multi-part payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
+            // TODO: forward multi-part to dedicated actor
+            case None =>
               log.info(s"received payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat}")
               // amount is correct or was not specified in the payment request
               nodeParams.db.payments.addIncomingPayment(IncomingPayment(htlc.paymentHash, htlc.amountMsat, Platform.currentTime))
               sender ! CMD_FULFILL_HTLC(htlc.id, paymentPreimage, commit = true)
               context.system.eventStream.publish(PaymentReceived(MilliSatoshi(htlc.amountMsat), htlc.paymentHash, htlc.channelId))
           }
+        }
         case None =>
-          sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(htlc.amountMsat)), commit = true)
+          sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(multiPartTotalAmount(perHop).getOrElse(htlc.amountMsat))), commit = true)
+      }
+  }
+
+  private def validatePayment(paymentRequest: PaymentRequest, htlc: UpdateAddHtlc, perHop: OnionPerHopPayload): Option[CMD_FAIL_HTLC] = multiPartTotalAmount(perHop) match {
+    case Some(totalAmountMsat) if !paymentRequest.features.allowMultiPart =>
+      log.warning(s"received multi-part payment but invoice doesn't support it for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmountMsat=$totalAmountMsat")
+      Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat))))
+    case totalAmountMsat_opt =>
+      val totalAmountMsat = totalAmountMsat_opt.getOrElse(htlc.amountMsat)
+      val minFinalExpiry = Globals.blockCount.get() + paymentRequest.minFinalCltvExpiry.getOrElse(Channel.MIN_CLTV_EXPIRY)
+      // The htlc amount must be equal or greater than the requested amount. A slight overpaying is permitted, however
+      // it must not be greater than two times the requested amount.
+      // see https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#failure-messages
+      paymentRequest.amount match {
+        case _ if paymentRequest.isExpired =>
+          log.warning(s"received expired payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
+          Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat)), commit = true))
+        case _ if htlc.cltvExpiry < minFinalExpiry =>
+          log.warning(s"received payment with invalid expiry for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
+          Some(CMD_FAIL_HTLC(htlc.id, Right(FinalExpiryTooSoon), commit = true))
+        case Some(amount) if MilliSatoshi(totalAmountMsat) < amount =>
+          log.warning(s"received payment with amount too small for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
+          Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat)), commit = true))
+        case Some(amount) if MilliSatoshi(totalAmountMsat) > amount * 2 =>
+          log.warning(s"received payment with amount too large for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
+          Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat)), commit = true))
+        case _ =>
+          None
       }
   }
 
@@ -92,5 +117,12 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
 object LocalPaymentHandler {
 
   def props(nodeParams: NodeParams): Props = Props(new LocalPaymentHandler(nodeParams))
+
+  private def multiPartTotalAmount(perHop: OnionPerHopPayload): Option[Long] = perHop.payload match {
+    case Left(tlv) => for {
+      totalAmountMsat <- tlv.records.collectFirst { case OnionTlv.MultiPartPayment(totalAmountMsat) => totalAmountMsat }
+    } yield totalAmountMsat
+    case _ => None
+  }
 
 }

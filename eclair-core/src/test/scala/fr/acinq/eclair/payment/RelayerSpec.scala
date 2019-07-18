@@ -24,7 +24,7 @@ import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
 import fr.acinq.eclair._
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.Sphinx
-import fr.acinq.eclair.payment.PaymentLifecycle.{LegacyPayload, buildCommand, buildOnion}
+import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, LegacyPayload, buildCommand, buildOnion}
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire._
 import org.scalatest.Outcome
@@ -159,8 +159,10 @@ class RelayerSpec extends TestkitBaseClass {
     val add_ab = UpdateAddHtlc(channelId = channelId_ab, id = 123456, cmd.amountMsat, cmd.paymentHash, cmd.cltvExpiry, cmd.onion)
     sender.send(relayer, ForwardAdd(add_ab))
 
-    val htlc = paymentHandler.expectMsgType[UpdateAddHtlc]
+    val DecryptedHtlc(htlc, OnionPerHopPayload(Right(OnionForwardInfo(_, amount, cltv)))) = paymentHandler.expectMsgType[DecryptedHtlc]
     assert(htlc === add_ab)
+    assert(amount === finalAmountMsat)
+    assert(cltv === finalExpiry)
 
     sender.expectNoMsg(100 millis)
     register.expectNoMsg(100 millis)

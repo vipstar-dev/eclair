@@ -41,7 +41,7 @@ import scala.util.Success
 
 class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSuiteLike with IdiomaticMockito {
 
-  implicit val timeout = Timeout(30 seconds)
+  implicit val timeout: Timeout = Timeout(30 seconds)
 
   case class FixtureParam(register: TestProbe, router: TestProbe, paymentInitiator: TestProbe, switchboard: TestProbe, paymentHandler: TestProbe, kit: Kit)
 
@@ -182,32 +182,31 @@ class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSu
 
     val fallBackAddressRaw = "muhtvdmsnbQEPFuEmxcChX58fGvXaaUoVt"
     val eclair = new EclairImpl(kit)
-    eclair.receive("some desc", Some(123L), Some(456), Some(fallBackAddressRaw), None)
+    eclair.receive("some desc", Some(123L), Some(456), Some(fallBackAddressRaw), None, Some(true))
     val receive = paymentHandler.expectMsgType[ReceivePayment]
 
     assert(receive.amountMsat_opt === Some(MilliSatoshi(123L)))
     assert(receive.expirySeconds_opt === Some(456))
     assert(receive.fallbackAddress === Some(fallBackAddressRaw))
+    assert(receive.allowMultiPart)
 
     // try with wrong address format
-    assertThrows[IllegalArgumentException](eclair.receive("some desc", Some(123L), Some(456), Some("wassa wassa"), None))
+    assertThrows[IllegalArgumentException](eclair.receive("some desc", Some(123L), Some(456), Some("wassa wassa"), None, None))
   }
 
-  test("passing a payment_preimage to /createinvoice should result in an invoice with payment_hash=H(payment_preimage)") { fixture =>
-
+  test("passing a payment_preimage to /createinvoice should result in an invoice with payment_hash=H(payment_preimage)") { f =>
     val paymentHandler = system.actorOf(LocalPaymentHandler.props(Alice.nodeParams))
-    val kitWithPaymentHandler = fixture.kit.copy(paymentHandler = paymentHandler)
+    val kitWithPaymentHandler = f.kit.copy(paymentHandler = paymentHandler)
     val eclair = new EclairImpl(kitWithPaymentHandler)
     val paymentPreimage = randomBytes32
 
-    val fResp = eclair.receive(description = "some desc", amountMsat_opt = None, expire_opt = None, fallbackAddress_opt = None, paymentPreimage_opt = Some(paymentPreimage))
+    val fResp = eclair.receive(description = "some desc", amountMsat_opt = None, expire_opt = None, fallbackAddress_opt = None, paymentPreimage_opt = Some(paymentPreimage), allowMultiPart_opt = None)
     awaitCond({
       fResp.value match {
         case Some(Success(pr)) => pr.paymentHash == Crypto.sha256(paymentPreimage)
         case _ => false
       }
     })
-
   }
 
   test("networkFees/audit/allinvoices should use a default to/from filter expressed in seconds") { f =>

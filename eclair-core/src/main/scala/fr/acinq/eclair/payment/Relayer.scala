@@ -25,7 +25,7 @@ import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.Sphinx
 import fr.acinq.eclair.db.OutgoingPaymentStatus
-import fr.acinq.eclair.payment.PaymentLifecycle.{PaymentFailed, PaymentSucceeded}
+import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, PaymentFailed, PaymentSucceeded}
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire._
 import fr.acinq.eclair.{Features, NodeParams, ShortChannelId, nodeFee}
@@ -108,7 +108,7 @@ class Relayer(nodeParams: NodeParams, register: ActorRef, paymentHandler: ActorR
               commandBuffer ! CommandBuffer.CommandSend(add.channelId, add.id, cmdFail)
             case Right(addHtlc) =>
               log.debug(s"forwarding htlc #${add.id} paymentHash=${add.paymentHash} to payment-handler")
-              paymentHandler forward addHtlc
+              paymentHandler forward DecryptedHtlc(addHtlc, p.payload)
           }
         case Right(r: RelayPayload) =>
           handleRelay(r, channelUpdates, node2channels, previousFailures, nodeParams.chainHash) match {
