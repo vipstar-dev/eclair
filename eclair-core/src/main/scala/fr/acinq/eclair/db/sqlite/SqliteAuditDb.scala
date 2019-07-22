@@ -18,6 +18,7 @@ package fr.acinq.eclair.db.sqlite
 
 import java.sql.{Connection, Statement}
 import java.util.UUID
+
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.MilliSatoshi
 import fr.acinq.eclair.channel.{AvailableBalanceChanged, Channel, ChannelErrorOccured, NetworkFeePaid}
@@ -25,9 +26,10 @@ import fr.acinq.eclair.db.{AuditDb, ChannelLifecycleEvent, NetworkFee, Stats}
 import fr.acinq.eclair.payment.{PaymentReceived, PaymentRelayed, PaymentSent}
 import fr.acinq.eclair.wire.ChannelCodecs
 import grizzled.slf4j.Logging
+
 import scala.collection.immutable.Queue
 import scala.compat.Platform
-import concurrent.duration._
+import scala.concurrent.duration._
 
 class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
 
@@ -35,7 +37,7 @@ class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
   import ExtendedResultSet._
 
   val DB_NAME = "audit"
-  val CURRENT_VERSION = 3
+  val CURRENT_VERSION = 4
 
   using(sqlite.createStatement()) { statement =>
 
@@ -48,6 +50,13 @@ class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
       statement.executeUpdate("CREATE INDEX IF NOT EXISTS channel_errors_timestamp_idx ON channel_errors(timestamp)")
     }
 
+    def migration34(statement: Statement) = {
+      statement.executeUpdate("ALTER TABLE received RENAME TO _received_old")
+      statement.executeUpdate("CREATE TABLE received (amount_msat INTEGER NOT NULL, payment_hash BLOB NOT NULL, timestamp INTEGER NOT NULL)")
+      statement.executeUpdate("INSERT INTO received (amount_msat, payment_hash, timestamp) SELECT amount_msat, payment_hash, timestamp FROM _received_old")
+      statement.executeUpdate("DROP table _received_old")
+    }
+
     getVersion(statement, DB_NAME, CURRENT_VERSION) match {
       case 1 => // previous version let's migrate
         logger.warn(s"migrating db $DB_NAME, found version=1 current=$CURRENT_VERSION")
@@ -58,10 +67,14 @@ class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
         logger.warn(s"migrating db $DB_NAME, found version=2 current=$CURRENT_VERSION")
         migration23(statement)
         setVersion(statement, DB_NAME, CURRENT_VERSION)
+      case 3 =>
+        logger.warn(s"migrating db $DB_NAME, found version=3 current=$CURRENT_VERSION")
+        migration34(statement)
+        setVersion(statement, DB_NAME, CURRENT_VERSION)
       case CURRENT_VERSION =>
         statement.executeUpdate("CREATE TABLE IF NOT EXISTS balance_updated (channel_id BLOB NOT NULL, node_id BLOB NOT NULL, amount_msat INTEGER NOT NULL, capacity_sat INTEGER NOT NULL, reserve_sat INTEGER NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE IF NOT EXISTS sent (amount_msat INTEGER NOT NULL, fees_msat INTEGER NOT NULL, payment_hash BLOB NOT NULL, payment_preimage BLOB NOT NULL, to_channel_id BLOB NOT NULL, timestamp INTEGER NOT NULL, id BLOB NOT NULL)")
-        statement.executeUpdate("CREATE TABLE IF NOT EXISTS received (amount_msat INTEGER NOT NULL, payment_hash BLOB NOT NULL, from_channel_id BLOB NOT NULL, timestamp INTEGER NOT NULL)")
+        statement.executeUpdate("CREATE TABLE IF NOT EXISTS received (amount_msat INTEGER NOT NULL, payment_hash BLOB NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE IF NOT EXISTS relayed (amount_in_msat INTEGER NOT NULL, amount_out_msat INTEGER NOT NULL, payment_hash BLOB NOT NULL, from_channel_id BLOB NOT NULL, to_channel_id BLOB NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE IF NOT EXISTS network_fees (channel_id BLOB NOT NULL, node_id BLOB NOT NULL, tx_id BLOB NOT NULL, fee_sat INTEGER NOT NULL, tx_type TEXT NOT NULL, timestamp INTEGER NOT NULL)")
         statement.executeUpdate("CREATE TABLE IF NOT EXISTS channel_events (channel_id BLOB NOT NULL, node_id BLOB NOT NULL, capacity_sat INTEGER NOT NULL, is_funder BOOLEAN NOT NULL, is_private BOOLEAN NOT NULL, event STRING NOT NULL, timestamp INTEGER NOT NULL)")
@@ -116,11 +129,10 @@ class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
     }
 
   override def add(e: PaymentReceived): Unit =
-    using(sqlite.prepareStatement("INSERT INTO received VALUES (?, ?, ?, ?)")) { statement =>
+    using(sqlite.prepareStatement("INSERT INTO received VALUES (?, ?, ?)")) { statement =>
       statement.setLong(1, e.amount.toLong)
       statement.setBytes(2, e.paymentHash.toArray)
-      statement.setBytes(3, e.fromChannelId.toArray)
-      statement.setLong(4, e.timestamp)
+      statement.setLong(3, e.timestamp)
       statement.executeUpdate()
     }
 
@@ -190,7 +202,6 @@ class SqliteAuditDb(sqlite: Connection) extends AuditDb with Logging {
         q = q :+ PaymentReceived(
           amount = MilliSatoshi(rs.getLong("amount_msat")),
           paymentHash = rs.getByteVector32("payment_hash"),
-          fromChannelId = rs.getByteVector32("from_channel_id"),
           timestamp = rs.getLong("timestamp"))
       }
       q

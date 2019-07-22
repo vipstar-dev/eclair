@@ -19,7 +19,7 @@ package fr.acinq.eclair.payment
 import akka.actor.ActorSystem
 import akka.actor.Status.Failure
 import akka.testkit.{TestActorRef, TestKit, TestProbe}
-import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
+import fr.acinq.bitcoin.{ByteVector32, Crypto, MilliSatoshi}
 import fr.acinq.eclair.TestConstants.Alice
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC}
 import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, ReceivePayment}
@@ -59,7 +59,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
       sender.expectMsgType[CMD_FULFILL_HTLC]
 
       val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
-      assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(amountMsat, add.paymentHash, add.channelId, timestamp = 0))
+      assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(amountMsat, add.paymentHash, timestamp = 0))
       assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
     }
 
@@ -73,7 +73,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
       sender.send(handler, DecryptedHtlc(add, OnionForwardInfo(ShortChannelId(1), add.amountMsat, add.cltvExpiry)))
       sender.expectMsgType[CMD_FULFILL_HTLC]
       val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
-      assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(amountMsat, add.paymentHash, add.channelId, timestamp = 0))
+      assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(amountMsat, add.paymentHash, timestamp = 0))
       assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
     }
 
@@ -183,7 +183,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(IncorrectOrUnknownPaymentDetails(1000)))
   }
 
   test("LocalPaymentHandler should reject incoming multi-part payment if the payment request is expired") {
@@ -197,7 +197,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(IncorrectOrUnknownPaymentDetails(1000)))
     assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).isEmpty)
   }
 
@@ -212,7 +212,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 1, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(FinalExpiryTooSoon))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(FinalExpiryTooSoon))
   }
 
   test("LocalPaymentHandler should reject incoming multi-part payment with an unknown payment hash") {
@@ -226,7 +226,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash.reverse, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(1000)))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(IncorrectOrUnknownPaymentDetails(1000)))
   }
 
   test("LocalPaymentHandler should reject incoming multi-part payment with a total amount too low") {
@@ -240,7 +240,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(999))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(999)))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(IncorrectOrUnknownPaymentDetails(999)))
   }
 
   test("LocalPaymentHandler should reject incoming multi-part payment with a total amount too high") {
@@ -254,7 +254,88 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     val add = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(2001))))
-    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason == Right(IncorrectOrUnknownPaymentDetails(2001)))
+    assert(sender.expectMsgType[CMD_FAIL_HTLC].reason === Right(IncorrectOrUnknownPaymentDetails(2001)))
+  }
+
+  test("LocalPaymentHandler should handle multi-part payment timeout") {
+    val nodeParams = Alice.nodeParams.copy(multiPartPaymentExpiry = 50 millis)
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender1 = TestProbe()
+    val sender2 = TestProbe()
+
+    sender1.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "1 slow coffee", allowMultiPart = true))
+    val pr1 = sender1.expectMsgType[PaymentRequest]
+    val add1 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr1.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender1.send(handler, DecryptedHtlc(add1, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+
+    sender2.send(handler, ReceivePayment(Some(MilliSatoshi(1500)), "1 slow latte", allowMultiPart = true))
+    val pr2 = sender2.expectMsgType[PaymentRequest]
+    val add2 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 1, 1000, pr2.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender2.send(handler, DecryptedHtlc(add2, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1500))))
+
+    sender1.expectMsg(CMD_FAIL_HTLC(0, Right(IncorrectOrUnknownPaymentDetails(800)), commit = true))
+    sender2.expectMsg(CMD_FAIL_HTLC(1, Right(IncorrectOrUnknownPaymentDetails(1000)), commit = true))
+  }
+
+  test("LocalPaymentHandler should handle multi-part payment success") {
+    val nodeParams = Alice.nodeParams.copy(multiPartPaymentExpiry = 500 millis)
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender1 = TestProbe()
+    val sender2 = TestProbe()
+
+    val eventListener = TestProbe()
+    system.eventStream.subscribe(eventListener.ref, classOf[PaymentReceived])
+
+    sender1.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "1 fast coffee", allowMultiPart = true))
+    val pr = sender1.expectMsgType[PaymentRequest]
+
+    val add1 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender1.send(handler, DecryptedHtlc(add1, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    val add2 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(2)), 42, 200, pr.paymentHash, Globals.blockCount.get() + 16, TestConstants.emptyOnionPacket)
+    sender2.send(handler, DecryptedHtlc(add2, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+
+    val fulfill1 = sender1.expectMsgType[CMD_FULFILL_HTLC]
+    assert(fulfill1.id === 0)
+    assert(Crypto.sha256(fulfill1.r) === pr.paymentHash)
+    val fulfill2 = sender2.expectMsgType[CMD_FULFILL_HTLC]
+    assert(fulfill2.id === 42)
+    assert(Crypto.sha256(fulfill2.r) === pr.paymentHash)
+
+    val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
+    assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(MilliSatoshi(1000), pr.paymentHash, timestamp = 0))
+    assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
+  }
+
+  test("LocalPaymentHandler should handle multi-part payment timeout then success") {
+    val nodeParams = Alice.nodeParams.copy(multiPartPaymentExpiry = 100 millis)
+    val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
+    val sender = TestProbe()
+
+    val eventListener = TestProbe()
+    system.eventStream.subscribe(eventListener.ref, classOf[PaymentReceived])
+
+    sender.send(handler, ReceivePayment(Some(MilliSatoshi(1000)), "1 coffee, no sugar", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest]
+
+    val add1 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add1, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    sender.expectMsg(CMD_FAIL_HTLC(0, Right(IncorrectOrUnknownPaymentDetails(800)), commit = true))
+
+    val add2 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(2)), 2, 300, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add2, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+    val add3 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 5, 700, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
+    sender.send(handler, DecryptedHtlc(add3, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
+
+    val fulfill1 = sender.expectMsgType[CMD_FULFILL_HTLC]
+    assert(fulfill1.id === 2)
+    assert(Crypto.sha256(fulfill1.r) === pr.paymentHash)
+    val fulfill2 = sender.expectMsgType[CMD_FULFILL_HTLC]
+    assert(fulfill2.id === 5)
+    assert(Crypto.sha256(fulfill2.r) === pr.paymentHash)
+
+    val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
+    assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(MilliSatoshi(1000), pr.paymentHash, timestamp = 0))
+    assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
   }
 
 }

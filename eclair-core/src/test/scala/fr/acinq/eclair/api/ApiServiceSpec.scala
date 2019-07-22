@@ -368,7 +368,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
         system.eventStream.publish(prel)
         wsClient.expectMessage(expectedSerializedPrel)
 
-        val precv = PaymentReceived(amount = MilliSatoshi(21), paymentHash = ByteVector32.Zeroes, fromChannelId = ByteVector32.One, timestamp = 1553784963659L)
+        val precv = PaymentReceived(amount = MilliSatoshi(21), paymentHash = ByteVector32.Zeroes, timestamp = 1553784963659L)
         val expectedSerializedPrecv = """{"type":"payment-received","amount":21,"paymentHash":"0000000000000000000000000000000000000000000000000000000000000000","fromChannelId":"0100000000000000000000000000000000000000000000000000000000000000","timestamp":1553784963659}"""
         Serialization.write(precv)(mockService.formatsWithTypeHint) === expectedSerializedPrecv
         system.eventStream.publish(precv)

@@ -86,6 +86,7 @@ object TestConstants {
       channelFlags = 1,
       watcherType = BITCOIND,
       paymentRequestExpiry = 1 hour,
+      multiPartPaymentExpiry = 30 seconds,
       minFundingSatoshis = 1000L,
       routerConf = RouterConf(
         randomizeRouteSelection = false,
@@ -153,6 +154,7 @@ object TestConstants {
       channelFlags = 1,
       watcherType = BITCOIND,
       paymentRequestExpiry = 1 hour,
+      multiPartPaymentExpiry = 30 seconds,
       minFundingSatoshis = 1000L,
       routerConf = RouterConf(
         randomizeRouteSelection = false,

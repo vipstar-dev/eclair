@@ -16,8 +16,8 @@
 
 package fr.acinq.eclair.payment
 
-import akka.actor.{Actor, ActorLogging, Props, Status}
-import fr.acinq.bitcoin.{Crypto, MilliSatoshi}
+import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props, Status}
+import fr.acinq.bitcoin.{ByteVector32, Crypto, MilliSatoshi}
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC, Channel}
 import fr.acinq.eclair.db.IncomingPayment
 import fr.acinq.eclair.payment.PaymentLifecycle.{DecryptedHtlc, ReceivePayment}
@@ -41,6 +41,7 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
 
   implicit val ec: ExecutionContext = context.system.dispatcher
   val paymentDb = nodeParams.db.payments
+  var multiPartPayments = Map.empty[ByteVector32, ActorRef]
 
   override def receive: Receive = {
 
@@ -70,24 +71,43 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
           case None => multiPartTotalAmount(perHop) match {
             case Some(totalAmountMsat) =>
               log.info(s"received multi-part payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmoutMsat=$totalAmountMsat")
-            // TODO: forward multi-part to dedicated actor
+              val multiPartHandler = multiPartPayments.get(htlc.paymentHash) match {
+                case Some(handler) => handler
+                case None =>
+                  val handler = context.actorOf(MultiPartPaymentHandler.props(paymentPreimage, nodeParams.multiPartPaymentExpiry, self))
+                  multiPartPayments = multiPartPayments + (htlc.paymentHash -> handler)
+                  handler
+              }
+              multiPartHandler forward MultiPartPaymentHandler.MultiPartHtlc(totalAmountMsat, htlc)
             case None =>
               log.info(s"received payment for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat}")
               // amount is correct or was not specified in the payment request
               nodeParams.db.payments.addIncomingPayment(IncomingPayment(htlc.paymentHash, htlc.amountMsat, Platform.currentTime))
               sender ! CMD_FULFILL_HTLC(htlc.id, paymentPreimage, commit = true)
-              context.system.eventStream.publish(PaymentReceived(MilliSatoshi(htlc.amountMsat), htlc.paymentHash, htlc.channelId))
+              context.system.eventStream.publish(PaymentReceived(MilliSatoshi(htlc.amountMsat), htlc.paymentHash))
           }
         }
         case None =>
           sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(multiPartTotalAmount(perHop).getOrElse(htlc.amountMsat))), commit = true)
       }
+
+    case MultiPartPaymentHandler.MultiPartHtlcFailed(paymentPreimage) =>
+      val paymentHash = Crypto.sha256(paymentPreimage)
+      multiPartPayments.get(paymentHash).foreach(h => h ! PoisonPill)
+      multiPartPayments = multiPartPayments - paymentHash
+
+    case MultiPartPaymentHandler.MultiPartHtlcSucceeded(paymentPreimage, paidAmount) =>
+      val paymentHash = Crypto.sha256(paymentPreimage)
+      log.info(s"received complete multi-part payment for paymentHash=$paymentHash amountMsat=${paidAmount.amount}")
+      multiPartPayments.get(paymentHash).foreach(h => h ! PoisonPill)
+      nodeParams.db.payments.addIncomingPayment(IncomingPayment(paymentHash, paidAmount.amount, Platform.currentTime))
+      context.system.eventStream.publish(PaymentReceived(paidAmount, paymentHash))
   }
 
   private def validatePayment(paymentRequest: PaymentRequest, htlc: UpdateAddHtlc, perHop: OnionPerHopPayload): Option[CMD_FAIL_HTLC] = multiPartTotalAmount(perHop) match {
     case Some(totalAmountMsat) if !paymentRequest.features.allowMultiPart =>
       log.warning(s"received multi-part payment but invoice doesn't support it for paymentHash=${htlc.paymentHash} amountMsat=${htlc.amountMsat} totalAmountMsat=$totalAmountMsat")
-      Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat))))
+      Some(CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(totalAmountMsat)), commit = true))
     case totalAmountMsat_opt =>
       val totalAmountMsat = totalAmountMsat_opt.getOrElse(htlc.amountMsat)
       val minFinalExpiry = Globals.blockCount.get() + paymentRequest.minFinalCltvExpiry.getOrElse(Channel.MIN_CLTV_EXPIRY)
