@@ -42,7 +42,6 @@ case object RequiredNodeFeatureMissing extends Perm with Node { def message = "p
 case class InvalidOnionVersion(onionHash: ByteVector32) extends BadOnion with Perm { def message = "onion version was not understood by the processing node" }
 case class InvalidOnionHmac(onionHash: ByteVector32) extends BadOnion with Perm { def message = "onion HMAC was incorrect when it reached the processing node" }
 case class InvalidOnionKey(onionHash: ByteVector32) extends BadOnion with Perm { def message = "ephemeral key was unparsable by the processing node" }
-case class InvalidOnionPayload(onionHash: ByteVector32) extends BadOnion with Perm { def message = "onion per-hop payload could not be parsed" }
 case class TemporaryChannelFailure(update: ChannelUpdate) extends Update { def message = s"channel ${update.shortChannelId} is currently unavailable" }
 case object PermanentChannelFailure extends Perm { def message = "channel is permanently unavailable" }
 case object RequiredChannelFeatureMissing extends Perm { def message = "channel requires features not present in the onion" }
@@ -58,6 +57,7 @@ case object FinalExpiryTooSoon extends FailureMessage { def message = "payment e
 case class FinalIncorrectCltvExpiry(expiry: Long) extends FailureMessage { def message = "payment expiry doesn't match the value in the onion" }
 case class FinalIncorrectHtlcAmount(amountMsat: Long) extends FailureMessage { def message = "payment amount is incorrect in the final htlc" }
 case object ExpiryTooFar extends FailureMessage { def message = "payment expiry is too far in the future" }
+case class InvalidOnionPayload(onionHash: ByteVector32) extends Perm { def message = "onion per-hop payload is invalid" }
 // @formatter:on
 
 object FailureMessageCodecs {
@@ -77,7 +77,6 @@ object FailureMessageCodecs {
     .typecase(NODE | 2, provide(TemporaryNodeFailure))
     .typecase(PERM | 2, provide(PermanentNodeFailure))
     .typecase(PERM | NODE | 3, provide(RequiredNodeFeatureMissing))
-    .typecase(BADONION | PERM, sha256.as[InvalidOnionPayload])
     .typecase(BADONION | PERM | 4, sha256.as[InvalidOnionVersion])
     .typecase(BADONION | PERM | 5, sha256.as[InvalidOnionHmac])
     .typecase(BADONION | PERM | 6, sha256.as[InvalidOnionKey])
@@ -96,6 +95,7 @@ object FailureMessageCodecs {
     .typecase(18, ("expiry" | uint32).as[FinalIncorrectCltvExpiry])
     .typecase(19, ("amountMsat" | uint64overflow).as[FinalIncorrectHtlcAmount])
     .typecase(21, provide(ExpiryTooFar))
+    .typecase(PERM | 22, sha256.as[InvalidOnionPayload])
 
   /**
     * Return the failure code for a given failure message. This method actually encodes the failure message, which is a
