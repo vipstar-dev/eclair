@@ -16,10 +16,11 @@
 
 package fr.acinq.eclair.wire
 
-import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
+import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.eclair.ShortChannelId
 import fr.acinq.eclair.UInt64.Conversions._
 import fr.acinq.eclair.wire.OnionCodecs._
+import fr.acinq.eclair.wire.OnionPerHopPayload._
 import fr.acinq.eclair.wire.OnionTlv._
 import org.scalatest.FunSuite
 import scodec.bits.HexStringSyntax
@@ -49,10 +50,10 @@ class OnionCodecsSpec extends FunSuite {
     )
 
     for ((expected, bin) <- testCases) {
-      val decoded = perHopPayloadCodec.decode(bin.bits).require.value
-      assert(decoded === Right(expected))
+      val OnionPerHopPayload(Right(decoded)) = perHopPayloadCodec.decode(bin.bits).require.value
+      assert(decoded === expected)
 
-      val encoded = perHopPayloadCodec.encode(Right(expected)).require.bytes
+      val encoded = perHopPayloadCodec.encode(expected).require.bytes
       assert(encoded === bin)
     }
   }
@@ -76,16 +77,16 @@ class OnionCodecsSpec extends FunSuite {
 
   test("encode/decode variable-length (tlv) per-hop payload") {
     val testCases = Map(
-      TlvStream[OnionTlv](Destination()) -> hex"02 0000",
-      TlvStream[OnionTlv](AmountToForward(MilliSatoshi(561)), OutgoingCltv(42), OutgoingChannelId(ShortChannelId(1105))) -> hex"11 02020231 04012a 06080000000000000451",
-      TlvStream[OnionTlv](Seq(Destination(), AmountToForward(MilliSatoshi(561)), OutgoingCltv(42)), Seq(GenericTlv(65535, hex"06c1"))) -> hex"0f 0000 02020231 04012a fdffff0206c1"
+      TlvStream[OnionTlv]() -> hex"00",
+      TlvStream[OnionTlv](AmountToForward(561), OutgoingCltv(42), OutgoingChannelId(ShortChannelId(1105))) -> hex"11 02020231 04012a 06080000000000000451",
+      TlvStream[OnionTlv](Seq(AmountToForward(561), OutgoingCltv(42)), Seq(GenericTlv(65535, hex"06c1"))) -> hex"0d 02020231 04012a fdffff0206c1"
     )
 
     for ((expected, bin) <- testCases) {
-      val decoded = perHopPayloadCodec.decode(bin.bits).require.value
-      assert(decoded === Left(expected))
+      val OnionPerHopPayload(Left(decoded)) = perHopPayloadCodec.decode(bin.bits).require.value
+      assert(decoded === expected)
 
-      val encoded = perHopPayloadCodec.encode(Left(expected)).require.bytes
+      val encoded = perHopPayloadCodec.encode(expected).require.bytes
       assert(encoded === bin)
     }
   }
@@ -105,6 +106,43 @@ class OnionCodecsSpec extends FunSuite {
     for (testCase <- testCases) {
       assert(perHopPayloadCodec.decode(testCase.bits).isFailure)
     }
+  }
+
+  test("get payment info") {
+    val legacyPayload: OnionPerHopPayload = OnionForwardInfo(ShortChannelId(550), 561, 1105)
+    assert(legacyPayload.paymentInfo === Some(OnionPaymentInfo(561, 1105)))
+
+    val tlvPayload: OnionPerHopPayload = TlvStream[OnionTlv](AmountToForward(561), OutgoingCltv(1105))
+    assert(tlvPayload.paymentInfo === Some(OnionPaymentInfo(561, 1105)))
+
+    val tlvPayloadUnknown: OnionPerHopPayload = TlvStream[OnionTlv](Seq(AmountToForward(561), OutgoingCltv(1105)), Seq(GenericTlv(13, hex"2a")))
+    assert(tlvPayloadUnknown.paymentInfo === Some(OnionPaymentInfo(561, 1105)))
+
+    val tlvPayloadNoCltv: OnionPerHopPayload = TlvStream[OnionTlv](AmountToForward(561))
+    assert(tlvPayloadNoCltv.paymentInfo === None)
+
+    val tlvPayloadNoAmount: OnionPerHopPayload = TlvStream[OnionTlv](OutgoingCltv(1105))
+    assert(tlvPayloadNoAmount.paymentInfo === None)
+  }
+
+  test("get forward info") {
+    val legacyPayload: OnionPerHopPayload = OnionForwardInfo(ShortChannelId(550), 561, 1105)
+    assert(legacyPayload.forwardInfo === Some(OnionForwardInfo(ShortChannelId(550), 561, 1105)))
+
+    val tlvPayload: OnionPerHopPayload = TlvStream[OnionTlv](AmountToForward(561), OutgoingCltv(1105), OutgoingChannelId(ShortChannelId(550)))
+    assert(tlvPayload.forwardInfo === Some(OnionForwardInfo(ShortChannelId(550), 561, 1105)))
+
+    val tlvPayloadUnknown: OnionPerHopPayload = TlvStream[OnionTlv](Seq(AmountToForward(561), OutgoingCltv(1105), OutgoingChannelId(ShortChannelId(550))), Seq(GenericTlv(13, hex"2a")))
+    assert(tlvPayloadUnknown.forwardInfo === Some(OnionForwardInfo(ShortChannelId(550), 561, 1105)))
+
+    val tlvPayloadNoCltv: OnionPerHopPayload = TlvStream[OnionTlv](AmountToForward(561), OutgoingChannelId(ShortChannelId(550)))
+    assert(tlvPayloadNoCltv.forwardInfo === None)
+
+    val tlvPayloadNoAmount: OnionPerHopPayload = TlvStream[OnionTlv](OutgoingCltv(1105), OutgoingChannelId(ShortChannelId(550)))
+    assert(tlvPayloadNoAmount.forwardInfo === None)
+
+    val tlvPayloadNoChannelId: OnionPerHopPayload = TlvStream[OnionTlv](AmountToForward(561), OutgoingCltv(1105))
+    assert(tlvPayloadNoChannelId.forwardInfo === None)
   }
 
 }
