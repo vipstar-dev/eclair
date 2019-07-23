@@ -19,7 +19,7 @@ package fr.acinq.eclair.router
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256, verifySignature}
 import fr.acinq.bitcoin.{ByteVector32, ByteVector64, Crypto, LexicographicalOrdering}
 import fr.acinq.eclair.wire._
-import fr.acinq.eclair.{Features, ShortChannelId, serializationResult}
+import fr.acinq.eclair.{ShortChannelId, serializationResult}
 import scodec.bits.{BitVector, ByteVector}
 import shapeless.HNil
 
@@ -73,9 +73,8 @@ object Announcements {
     )
   }
 
-  def makeNodeAnnouncement(nodeSecret: PrivateKey, alias: String, color: Color, nodeAddresses: List[NodeAddress], timestamp: Long = Platform.currentTime.milliseconds.toSeconds): NodeAnnouncement = {
+  def makeNodeAnnouncement(nodeSecret: PrivateKey, alias: String, color: Color, nodeAddresses: List[NodeAddress], features: ByteVector, timestamp: Long = Platform.currentTime.milliseconds.toSeconds): NodeAnnouncement = {
     require(alias.length <= 32)
-    val features = BitVector.fromLong(1 << Features.VARIABLE_LENGTH_ONION_OPTIONAL).bytes
     val witness = nodeAnnouncementWitnessEncode(timestamp, nodeSecret.publicKey, color, alias, features, nodeAddresses, unknownFields = ByteVector.empty)
     val sig = Crypto.sign(witness, nodeSecret)
     NodeAnnouncement(

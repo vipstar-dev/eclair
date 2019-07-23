@@ -19,9 +19,9 @@ package fr.acinq.eclair.router
 import akka.Done
 import akka.actor.{ActorRef, Props, Status}
 import akka.event.Logging.MDC
-import fr.acinq.bitcoin.{ByteVector32, ByteVector64}
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.Script.{pay2wsh, write}
+import fr.acinq.bitcoin.{ByteVector32, ByteVector64}
 import fr.acinq.eclair._
 import fr.acinq.eclair.blockchain._
 import fr.acinq.eclair.channel._
@@ -33,7 +33,6 @@ import fr.acinq.eclair.router.Graph.GraphStructure.{DirectedGraph, GraphEdge}
 import fr.acinq.eclair.router.Graph.{RichWeight, WeightRatios}
 import fr.acinq.eclair.transactions.Scripts
 import fr.acinq.eclair.wire._
-import scodec.bits.ByteVector
 
 import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.collection.{SortedSet, mutable}
@@ -155,7 +154,7 @@ class Router(nodeParams: NodeParams, watcher: ActorRef, initialized: Option[Prom
 
     // on restart we update our node announcement
     // note that if we don't currently have public channels, this will be ignored
-    val nodeAnn = Announcements.makeNodeAnnouncement(nodeParams.privateKey, nodeParams.alias, nodeParams.color, nodeParams.publicAddresses)
+    val nodeAnn = Announcements.makeNodeAnnouncement(nodeParams.privateKey, nodeParams.alias, nodeParams.color, nodeParams.publicAddresses, nodeParams.globalFeatures)
     self ! nodeAnn
 
     log.info(s"initialization completed, ready to process messages")
@@ -250,7 +249,7 @@ class Router(nodeParams: NodeParams, watcher: ActorRef, initialized: Option[Prom
             // in case we just validated our first local channel, we announce the local node
             if (!d0.nodes.contains(nodeParams.nodeId) && isRelatedTo(c, nodeParams.nodeId)) {
               log.info("first local channel validated, announcing local node")
-              val nodeAnn = Announcements.makeNodeAnnouncement(nodeParams.privateKey, nodeParams.alias, nodeParams.color, nodeParams.publicAddresses)
+              val nodeAnn = Announcements.makeNodeAnnouncement(nodeParams.privateKey, nodeParams.alias, nodeParams.color, nodeParams.publicAddresses, nodeParams.globalFeatures)
               self ! nodeAnn
             }
             true

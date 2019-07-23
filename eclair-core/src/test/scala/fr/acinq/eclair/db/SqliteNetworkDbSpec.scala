@@ -23,7 +23,7 @@ import fr.acinq.eclair.wire.{Color, NodeAddress, Tor2}
 import fr.acinq.eclair.{ShortChannelId, TestConstants, randomBytes32, randomKey}
 import org.scalatest.FunSuite
 import org.sqlite.SQLiteException
-
+import scodec.bits.HexStringSyntax
 
 class SqliteNetworkDbSpec extends FunSuite {
 
@@ -39,15 +39,15 @@ class SqliteNetworkDbSpec extends FunSuite {
     val sqlite = TestConstants.sqliteInMemory()
     val db = new SqliteNetworkDb(sqlite)
 
-    val node_1 = Announcements.makeNodeAnnouncement(randomKey, "node-alice", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil)
-    val node_2 = Announcements.makeNodeAnnouncement(randomKey, "node-bob", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil)
-    val node_3 = Announcements.makeNodeAnnouncement(randomKey, "node-charlie", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil)
-    val node_4 = Announcements.makeNodeAnnouncement(randomKey, "node-charlie", Color(100.toByte, 200.toByte, 300.toByte), Tor2("aaaqeayeaudaocaj", 42000) :: Nil)
+    val node_1 = Announcements.makeNodeAnnouncement(randomKey, "node-alice", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, hex"")
+    val node_2 = Announcements.makeNodeAnnouncement(randomKey, "node-bob", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, hex"0200")
+    val node_3 = Announcements.makeNodeAnnouncement(randomKey, "node-charlie", Color(100.toByte, 200.toByte, 300.toByte), NodeAddress.fromParts("192.168.1.42", 42000).get :: Nil, hex"0200")
+    val node_4 = Announcements.makeNodeAnnouncement(randomKey, "node-charlie", Color(100.toByte, 200.toByte, 300.toByte), Tor2("aaaqeayeaudaocaj", 42000) :: Nil, hex"00")
 
     assert(db.listNodes().toSet === Set.empty)
     db.addNode(node_1)
     db.addNode(node_1) // duplicate is ignored
-    assert(db.getNode(node_1.nodeId) == Some(node_1))
+    assert(db.getNode(node_1.nodeId) === Some(node_1))
     assert(db.listNodes().size === 1)
     db.addNode(node_2)
     db.addNode(node_3)
