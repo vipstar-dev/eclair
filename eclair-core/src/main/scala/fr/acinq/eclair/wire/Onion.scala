@@ -50,29 +50,19 @@ case class OnionPerHopPayload(payload: Either[TlvStream[OnionTlv], OnionForwardI
 
   lazy val paymentInfo: Option[OnionPaymentInfo] = payload match {
     case Right(OnionForwardInfo(_, amount, cltv)) => Some(OnionPaymentInfo(amount, cltv))
-    case Left(tlv) =>
-      tlv.records.foldLeft((None, None): (Option[Long], Option[Long])) {
-        case ((_, cltv), AmountToForward(amount)) => (Some(amount), cltv)
-        case ((amount, _), OutgoingCltv(cltv)) => (amount, Some(cltv))
-        case (res, _) => res
-      } match {
-        case (Some(amount), Some(cltv)) => Some(OnionPaymentInfo(amount, cltv))
-        case _ => None
-      }
+    case Left(tlv) => for {
+      amount <- tlv.records.collectFirst { case AmountToForward(amountMsat) => amountMsat }
+      cltv <- tlv.records.collectFirst { case OutgoingCltv(cltv) => cltv }
+    } yield OnionPaymentInfo(amount, cltv)
   }
 
   lazy val forwardInfo: Option[OnionForwardInfo] = payload match {
     case Right(onionForwardInfo) => Some(onionForwardInfo)
-    case Left(tlv) =>
-      tlv.records.foldLeft((None, None, None): (Option[ShortChannelId], Option[Long], Option[Long])) {
-        case ((_, amount, cltv), OutgoingChannelId(channelId)) => (Some(channelId), amount, cltv)
-        case ((channelId, _, cltv), AmountToForward(amount)) => (channelId, Some(amount), cltv)
-        case ((channelId, amount, _), OutgoingCltv(cltv)) => (channelId, amount, Some(cltv))
-        case (res, _) => res
-      } match {
-        case (Some(channelId), Some(amount), Some(cltv)) => Some(OnionForwardInfo(channelId, amount, cltv))
-        case _ => None
-      }
+    case Left(tlv) => for {
+      shortChannelId <- tlv.records.collectFirst { case OutgoingChannelId(shortChannelId) => shortChannelId }
+      amount <- tlv.records.collectFirst { case AmountToForward(amountMsat) => amountMsat }
+      cltv <- tlv.records.collectFirst { case OutgoingCltv(cltv) => cltv }
+    } yield OnionForwardInfo(shortChannelId, amount, cltv)
   }
 
 }
