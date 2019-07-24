@@ -78,13 +78,13 @@ trait Eclair {
 
   def receivedInfo(paymentHash: ByteVector32)(implicit timeout: Timeout): Future[Option[IncomingPayment]]
 
-  def send(recipientNodeId: PublicKey, amountMsat: Long, paymentHash: ByteVector32, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty, minFinalCltvExpiry_opt: Option[Long] = None, maxAttempts_opt: Option[Int] = None, feeThresholdSat_opt: Option[Long] = None, maxFeePct_opt: Option[Double] = None)(implicit timeout: Timeout): Future[UUID]
+  def send(recipientNodeId: PublicKey, amountMsat: Long, paymentHash: ByteVector32, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty, minFinalCltvExpiry_opt: Option[Long] = None, maxAttempts_opt: Option[Int] = None, feeThresholdSat_opt: Option[Long] = None, maxFeePct_opt: Option[Double] = None, allowMultiPart_opt: Option[Boolean] = None, multiPartTotalAmountMsat_opt: Option[Long] = None)(implicit timeout: Timeout): Future[UUID]
 
   def sentInfo(id: Either[UUID, ByteVector32])(implicit timeout: Timeout): Future[Seq[OutgoingPayment]]
 
   def findRoute(targetNodeId: PublicKey, amountMsat: Long, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty)(implicit timeout: Timeout): Future[RouteResponse]
 
-  def sendToRoute(route: Seq[PublicKey], amountMsat: Long, paymentHash: ByteVector32, finalCltvExpiry: Long)(implicit timeout: Timeout): Future[UUID]
+  def sendToRoute(route: Seq[PublicKey], amountMsat: Long, paymentHash: ByteVector32, finalCltvExpiry: Long, multiPartTotalAmountMsat_opt: Option[Long] = None)(implicit timeout: Timeout): Future[UUID]
 
   def audit(from_opt: Option[Long], to_opt: Option[Long])(implicit timeout: Timeout): Future[AuditResponse]
 
@@ -186,11 +186,11 @@ class EclairImpl(appKit: Kit) extends Eclair {
     (appKit.router ? RouteRequest(appKit.nodeParams.nodeId, targetNodeId, amountMsat, assistedRoutes)).mapTo[RouteResponse]
   }
 
-  override def sendToRoute(route: Seq[PublicKey], amountMsat: Long, paymentHash: ByteVector32, finalCltvExpiry: Long)(implicit timeout: Timeout): Future[UUID] = {
-    (appKit.paymentInitiator ? SendPaymentRequest(amountMsat, paymentHash, route.last, 1, route, finalCltvExpiry = finalCltvExpiry)).mapTo[UUID]
+  override def sendToRoute(route: Seq[PublicKey], amountMsat: Long, paymentHash: ByteVector32, finalCltvExpiry: Long, multiPartTotalAmountMsat_opt: Option[Long] = None)(implicit timeout: Timeout): Future[UUID] = {
+    (appKit.paymentInitiator ? SendPaymentRequest(amountMsat, paymentHash, route.last, 1, route, finalCltvExpiry = finalCltvExpiry, allowMultiPart = multiPartTotalAmountMsat_opt.isDefined, multiPartTotalAmountMsat = multiPartTotalAmountMsat_opt)).mapTo[UUID]
   }
 
-  override def send(recipientNodeId: PublicKey, amountMsat: Long, paymentHash: ByteVector32, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty, minFinalCltvExpiry_opt: Option[Long], maxAttempts_opt: Option[Int], feeThresholdSat_opt: Option[Long], maxFeePct_opt: Option[Double])(implicit timeout: Timeout): Future[UUID] = {
+  override def send(recipientNodeId: PublicKey, amountMsat: Long, paymentHash: ByteVector32, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty, minFinalCltvExpiry_opt: Option[Long], maxAttempts_opt: Option[Int], feeThresholdSat_opt: Option[Long], maxFeePct_opt: Option[Double], allowMultiPart_opt: Option[Boolean], multiPartTotalAmountMsat_opt: Option[Long] = None)(implicit timeout: Timeout): Future[UUID] = {
     val maxAttempts = maxAttempts_opt.getOrElse(appKit.nodeParams.maxPaymentAttempts)
 
     val defaultRouteParams = Router.getDefaultRouteParams(appKit.nodeParams.routerConf)
@@ -200,8 +200,8 @@ class EclairImpl(appKit: Kit) extends Eclair {
     )
 
     val sendPayment = minFinalCltvExpiry_opt match {
-      case Some(minCltv) => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, finalCltvExpiry = minCltv, routeParams = Some(routeParams))
-      case None => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, routeParams = Some(routeParams))
+      case Some(minCltv) => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, finalCltvExpiry = minCltv, routeParams = Some(routeParams), allowMultiPart = allowMultiPart_opt.getOrElse(false), multiPartTotalAmountMsat = multiPartTotalAmountMsat_opt)
+      case None => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, routeParams = Some(routeParams), allowMultiPart = allowMultiPart_opt.getOrElse(false), multiPartTotalAmountMsat = multiPartTotalAmountMsat_opt)
     }
     (appKit.paymentInitiator ? sendPayment).mapTo[UUID]
   }

@@ -19,43 +19,69 @@ package fr.acinq.eclair.payment
 import java.util.UUID
 
 import akka.actor.ActorSystem
-import akka.testkit.{TestKit, TestProbe}
-import fr.acinq.eclair.TestConstants
+import akka.testkit.{TestActorRef, TestKit, TestProbe}
+import fr.acinq.eclair.channel.{AvailableBalanceChanged, LocalChannelDown, LocalChannelUpdate}
 import fr.acinq.eclair.payment.HtlcGenerationSpec._
+import fr.acinq.eclair.payment.PaymentInitiator.{LocalChannel, SendPaymentRequest}
 import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
 import fr.acinq.eclair.router.{FinalizeRoute, RouteParams, RouteRequest}
-import org.scalatest.FunSuiteLike
+import fr.acinq.eclair.{NodeParams, TestConstants, randomBytes32}
+import org.scalatest.{Outcome, fixture}
 
 /**
- * Created by t-bast on 25/07/2019.
+ * Created by t-bast on 24/07/2019.
  */
 
-class PaymentInitiatorSpec extends TestKit(ActorSystem("test")) with FunSuiteLike {
+class PaymentInitiatorSpec extends TestKit(ActorSystem("test")) with fixture.FunSuiteLike {
 
-  test("forward payment with pre-defined route") {
-    val sender = TestProbe()
+  case class FixtureParam(nodeParams: NodeParams, initiator: TestActorRef[PaymentInitiator], router: TestProbe, register: TestProbe, sender: TestProbe)
+
+  override def withFixture(test: OneArgTest): Outcome = {
+    val nodeParams = TestConstants.Alice.nodeParams
     val router = TestProbe()
-    val paymentInitiator = system.actorOf(PaymentInitiator.props(TestConstants.Alice.nodeParams, router.ref, TestProbe().ref))
+    val register = TestProbe()
+    val sender = TestProbe()
+    val initiator = TestActorRef(new PaymentInitiator(nodeParams, router.ref, register.ref))
+    withFixture(test.toNoArgTest(FixtureParam(nodeParams, initiator, router, register, sender)))
+  }
 
-    sender.send(paymentInitiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, Seq(a, b, c)))
+  test("forward payment with pre-defined route") { f =>
+    import f._
+    sender.send(initiator, SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, Seq(a, b, c)))
     sender.expectMsgType[UUID]
     router.expectMsg(FinalizeRoute(Seq(a, b, c)))
   }
 
-  test("forward legacy payment") {
-    val sender = TestProbe()
-    val router = TestProbe()
-    val paymentInitiator = system.actorOf(PaymentInitiator.props(TestConstants.Alice.nodeParams, router.ref, TestProbe().ref))
-
+  test("forward legacy payment") { f =>
+    import f._
     val hints = Seq(Seq(ExtraHop(b, channelUpdate_bc.shortChannelId, feeBaseMsat = 10, feeProportionalMillionths = 1, cltvExpiryDelta = 12)))
     val routeParams = RouteParams(randomize = true, 15, 1.5, 5, 561, None)
-    sender.send(paymentInitiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, assistedRoutes = hints, finalCltvExpiry = 42, routeParams = Some(routeParams)))
+    sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, assistedRoutes = hints, finalCltvExpiry = 42, routeParams = Some(routeParams)))
     sender.expectMsgType[UUID]
     router.expectMsg(RouteRequest(TestConstants.Alice.nodeParams.nodeId, c, finalAmountMsat, assistedRoutes = hints, routeParams = Some(routeParams)))
 
-    sender.send(paymentInitiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, e, 3))
+    sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, e, 3))
     sender.expectMsgType[UUID]
     router.expectMsg(RouteRequest(TestConstants.Alice.nodeParams.nodeId, e, finalAmountMsat))
+  }
+
+  test("handle channel events") { f =>
+    import f._
+    val shortChannelId_ab = channelUpdate_ab.shortChannelId
+    val channelUpdate_ab_1 = channelUpdate_ab.copy(timestamp = 41)
+    val update_ab_1 = LocalChannelUpdate(TestProbe().ref, randomBytes32, shortChannelId_ab, b, None, channelUpdate_ab_1, makeCommitments(randomBytes32, availableBalanceForSend = 41000L))
+    val channelUpdate_ab_2 = channelUpdate_ab.copy(timestamp = 42)
+    val update_ab_2 = LocalChannelUpdate(TestProbe().ref, randomBytes32, shortChannelId_ab, b, None, channelUpdate_ab_2, makeCommitments(randomBytes32, availableBalanceForSend = 42000L))
+
+    assert(initiator.underlyingActor.localChannels.isEmpty)
+    sender.send(initiator, update_ab_1)
+    assert(initiator.underlyingActor.localChannels === Map(shortChannelId_ab -> LocalChannel(b, 41000L, channelUpdate_ab_1)))
+    sender.send(initiator, update_ab_2)
+    assert(initiator.underlyingActor.localChannels === Map(shortChannelId_ab -> LocalChannel(b, 42000L, channelUpdate_ab_2)))
+    sender.send(initiator, AvailableBalanceChanged(TestProbe().ref, randomBytes32, shortChannelId_ab, 40000L, makeCommitments(randomBytes32, availableBalanceForSend = 40000L)))
+    assert(initiator.underlyingActor.localChannels === Map(shortChannelId_ab -> LocalChannel(b, 40000L, channelUpdate_ab_2)))
+    sender.send(initiator, LocalChannelDown(TestProbe().ref, randomBytes32, shortChannelId_ab, b))
+    assert(initiator.underlyingActor.localChannels.isEmpty)
   }
 
 }

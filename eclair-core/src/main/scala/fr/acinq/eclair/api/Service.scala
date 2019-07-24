@@ -224,20 +224,20 @@ trait Service extends ExtraDirectives with Logging {
                         path("payinvoice") {
                           formFields(invoiceFormParam, amountMsatFormParam.?, "maxAttempts".as[Int].?, "feeThresholdSat".as[Long].?, "maxFeePct".as[Double].?) {
                             case (invoice@PaymentRequest(_, Some(amount), _, nodeId, _, _), None, maxAttempts, feeThresholdSat_opt, maxFeePct_opt) =>
-                              complete(eclairApi.send(nodeId, amount.toLong, invoice.paymentHash, invoice.routingInfo, invoice.minFinalCltvExpiry, maxAttempts, feeThresholdSat_opt, maxFeePct_opt))
+                              complete(eclairApi.send(nodeId, amount.toLong, invoice.paymentHash, invoice.routingInfo, invoice.minFinalCltvExpiry, maxAttempts, feeThresholdSat_opt, maxFeePct_opt, Some(invoice.features.allowMultiPart)))
                             case (invoice, Some(overrideAmount), maxAttempts, feeThresholdSat_opt, maxFeePct_opt) =>
-                              complete(eclairApi.send(invoice.nodeId, overrideAmount, invoice.paymentHash, invoice.routingInfo, invoice.minFinalCltvExpiry, maxAttempts, feeThresholdSat_opt, maxFeePct_opt))
+                              complete(eclairApi.send(invoice.nodeId, overrideAmount, invoice.paymentHash, invoice.routingInfo, invoice.minFinalCltvExpiry, maxAttempts, feeThresholdSat_opt, maxFeePct_opt, Some(invoice.features.allowMultiPart)))
                             case _ => reject(MalformedFormFieldRejection("invoice", "The invoice must have an amount or you need to specify one using the field 'amountMsat'"))
                           }
                         } ~
                         path("sendtonode") {
-                          formFields(amountMsatFormParam, paymentHashFormParam, nodeIdFormParam, "maxAttempts".as[Int].?, "feeThresholdSat".as[Long].?, "maxFeePct".as[Double].?) { (amountMsat, paymentHash, nodeId, maxAttempts_opt, feeThresholdSat_opt, maxFeePct_opt) =>
-                            complete(eclairApi.send(nodeId, amountMsat, paymentHash, maxAttempts_opt = maxAttempts_opt, feeThresholdSat_opt = feeThresholdSat_opt, maxFeePct_opt = maxFeePct_opt))
+                          formFields(amountMsatFormParam, paymentHashFormParam, nodeIdFormParam, "maxAttempts".as[Int].?, "feeThresholdSat".as[Long].?, "maxFeePct".as[Double].?, "allowMultiPart".as[Boolean].?, "multiPartTotalAmountMsat".as[Long].?) { (amountMsat, paymentHash, nodeId, maxAttempts_opt, feeThresholdSat_opt, maxFeePct_opt, allowMultiPart_opt, multiPartTotalAmountMsat_opt) =>
+                            complete(eclairApi.send(nodeId, amountMsat, paymentHash, maxAttempts_opt = maxAttempts_opt, feeThresholdSat_opt = feeThresholdSat_opt, maxFeePct_opt = maxFeePct_opt, allowMultiPart_opt = allowMultiPart_opt, multiPartTotalAmountMsat_opt = multiPartTotalAmountMsat_opt))
                           }
                         } ~
                         path("sendtoroute") {
-                          formFields(amountMsatFormParam, paymentHashFormParam, "finalCltvExpiry".as[Long], "route".as[List[PublicKey]](pubkeyListUnmarshaller)) { (amountMsat, paymentHash, finalCltvExpiry, route) =>
-                            complete(eclairApi.sendToRoute(route, amountMsat, paymentHash, finalCltvExpiry))
+                          formFields(amountMsatFormParam, paymentHashFormParam, "finalCltvExpiry".as[Long], "route".as[List[PublicKey]](pubkeyListUnmarshaller), "multiPartTotalAmountMsat".as[Long].?) { (amountMsat, paymentHash, finalCltvExpiry, route, multiPartTotalAmountMsat_opt) =>
+                            complete(eclairApi.sendToRoute(route, amountMsat, paymentHash, finalCltvExpiry, multiPartTotalAmountMsat_opt))
                           }
                         } ~
                         path("getsentinfo") {

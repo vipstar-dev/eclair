@@ -109,14 +109,17 @@ class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSu
     assert(send1.amountMsat == 123)
     assert(send1.paymentHash == ByteVector32.Zeroes)
     assert(send1.assistedRoutes == hints)
+    assert(!send1.allowMultiPart)
 
-    // with finalCltvExpiry
-    eclair.send(recipientNodeId = nodeId, amountMsat = 123, paymentHash = ByteVector32.Zeroes, assistedRoutes = Seq.empty, minFinalCltvExpiry_opt = Some(96))
+    // with finalCltvExpiry and multi-part support
+    eclair.send(recipientNodeId = nodeId, amountMsat = 123, paymentHash = ByteVector32.Zeroes, assistedRoutes = Seq.empty, minFinalCltvExpiry_opt = Some(96), allowMultiPart_opt = Some(true), multiPartTotalAmountMsat_opt = Some(125))
     val send2 = paymentInitiator.expectMsgType[SendPaymentRequest]
     assert(send2.targetNodeId == nodeId)
     assert(send2.amountMsat == 123)
     assert(send2.paymentHash == ByteVector32.Zeroes)
     assert(send2.finalCltvExpiry == 96)
+    assert(send2.allowMultiPart)
+    assert(send2.multiPartTotalAmountMsat === Some(125))
 
     // with custom route fees parameters
     eclair.send(recipientNodeId = nodeId, amountMsat = 123, paymentHash = ByteVector32.Zeroes, assistedRoutes = Seq.empty, minFinalCltvExpiry_opt = None, feeThresholdSat_opt = Some(123), maxFeePct_opt = Some(4.20))
@@ -126,6 +129,7 @@ class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSu
     assert(send3.paymentHash == ByteVector32.Zeroes)
     assert(send3.routeParams.get.maxFeeBaseMsat == 123 * 1000) // conversion sat -> msat
     assert(send3.routeParams.get.maxFeePct == 4.20)
+    assert(!send1.allowMultiPart)
   }
 
   test("allupdates can filter by nodeId") { f =>
@@ -245,13 +249,15 @@ class EclairImplSpec extends TestKit(ActorSystem("mySystem")) with fixture.FunSu
 
     val route = Seq(PublicKey(hex"030bb6a5e0c6b203c7e2180fb78c7ba4bdce46126761d8201b91ddac089cdecc87"))
     val eclair = new EclairImpl(kit)
-    eclair.sendToRoute(route, 1234, ByteVector32.One, 123)
+    eclair.sendToRoute(route, 1234, ByteVector32.One, 123, Some(1235))
 
     val send = paymentInitiator.expectMsgType[SendPaymentRequest]
     assert(send.predefinedRoute == route)
     assert(send.amountMsat == 1234)
     assert(send.finalCltvExpiry == 123)
     assert(send.paymentHash == ByteVector32.One)
+    assert(send.allowMultiPart)
+    assert(send.multiPartTotalAmountMsat === Some(1235))
   }
 
 }

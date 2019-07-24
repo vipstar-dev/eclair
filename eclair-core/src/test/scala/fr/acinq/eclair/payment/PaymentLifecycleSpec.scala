@@ -74,6 +74,55 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     awaitCond(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.SUCCEEDED))
   }
 
+  test("send with route prefix") { _ =>
+    val nodeParams = TestConstants.Alice.nodeParams.copy(keyManager = testKeyManager)
+    val paymentDb = nodeParams.db.payments
+    val id = UUID.randomUUID()
+    val router = TestProbe()
+    val paymentFSM = system.actorOf(PaymentLifecycle.props(nodeParams, id, router.ref, TestProbe().ref))
+    val monitor = TestProbe()
+    val sender = TestProbe()
+
+    paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
+    val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
+
+    val request = SendPayment(randomBytes32, d, maxAttempts = 3, LegacyPayload(defaultAmountMsat, defaultExpiry), routePrefix = Seq(Hop(a, b, channelUpdate_ab), Hop(b, c, channelUpdate_bc)))
+    sender.send(paymentFSM, request)
+    router.expectMsg(RouteRequest(c, d, defaultAmountMsat))
+    val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
+    awaitCond(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
+
+    router.send(paymentFSM, RouteResponse(Seq(Hop(c, d, channelUpdate_cd)), Set.empty, Set.empty))
+    val Transition(_, WAITING_FOR_ROUTE, WAITING_FOR_PAYMENT_COMPLETE) = monitor.expectMsgClass(classOf[Transition[_]])
+  }
+
+  test("send with route prefix and retry") { _ =>
+    val nodeParams = TestConstants.Alice.nodeParams.copy(keyManager = testKeyManager)
+    val paymentDb = nodeParams.db.payments
+    val id = UUID.randomUUID()
+    val router = TestProbe()
+    val paymentFSM = system.actorOf(PaymentLifecycle.props(nodeParams, id, router.ref, TestProbe().ref))
+    val monitor = TestProbe()
+    val sender = TestProbe()
+
+    paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
+    val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
+
+    val request = SendPayment(randomBytes32, d, maxAttempts = 3, LegacyPayload(defaultAmountMsat, defaultExpiry), routePrefix = Seq(Hop(a, b, channelUpdate_ab), Hop(b, c, channelUpdate_bc)))
+    sender.send(paymentFSM, request)
+    router.expectMsg(RouteRequest(c, d, defaultAmountMsat))
+    val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
+    awaitCond(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
+
+    router.send(paymentFSM, RouteResponse(Seq(Hop(c, d, channelUpdate_cd)), Set.empty, Set.empty))
+    val Transition(_, WAITING_FOR_ROUTE, WAITING_FOR_PAYMENT_COMPLETE) = monitor.expectMsgClass(classOf[Transition[_]])
+
+    sender.send(paymentFSM, UpdateFailMalformedHtlc(randomBytes32, 0, randomBytes32, 0))
+    router.expectMsg(RouteRequest(c, d, defaultAmountMsat, ignoreChannels = Set(ChannelDesc(channelUpdate_ab.shortChannelId, a, b))))
+    val Transition(_, WAITING_FOR_PAYMENT_COMPLETE, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
+    assert(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
+  }
+
   test("payment failed (route not found)") { fixture =>
     import fixture._
     val defaultPaymentHash = randomBytes32
@@ -457,4 +506,5 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     val filtered = PaymentLifecycle.transformForUser(failures)
     assert(filtered == LocalFailure(RouteNotFound) :: RemoteFailure(Hop(a, b, channelUpdate_ab) :: Nil, Sphinx.DecryptedFailurePacket(a, TemporaryNodeFailure)) :: LocalFailure(ChannelUnavailable(ByteVector32.Zeroes)) :: Nil)
   }
+
 }

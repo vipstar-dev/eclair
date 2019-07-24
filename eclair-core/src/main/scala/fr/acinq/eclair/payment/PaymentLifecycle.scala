@@ -53,13 +53,14 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
       goto(WAITING_FOR_ROUTE) using WaitingForRoute(sender, send, failures = Nil)
 
     case Event(c: SendPayment, WaitingForRequest) =>
-      router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, routeParams = c.routeParams)
+      router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, routeParams = c.routeParams)
       paymentsDb.addOutgoingPayment(OutgoingPayment(id, c.paymentHash, None, c.paymentOptions.finalAmountMsat, Platform.currentTime, None, OutgoingPaymentStatus.PENDING))
       goto(WAITING_FOR_ROUTE) using WaitingForRoute(sender, c, failures = Nil)
   }
 
   when(WAITING_FOR_ROUTE) {
-    case Event(RouteResponse(hops, ignoreNodes, ignoreChannels), WaitingForRoute(s, c, failures)) =>
+    case Event(RouteResponse(routeHops, ignoreNodes, ignoreChannels), WaitingForRoute(s, c, failures)) =>
+      val hops = c.routePrefix ++ routeHops
       log.info(s"route found: attempt=${failures.size + 1}/${c.maxAttempts} route=${hops.map(_.nextNodeId).mkString("->")} channels=${hops.map(_.lastUpdate.shortChannelId).mkString("->")}")
       val firstHop = hops.head
       val (cmd, sharedSecrets) = buildCommand(id, c.paymentHash, hops, c.paymentOptions)
@@ -108,12 +109,12 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
           // in that case we don't know which node is sending garbage, let's try to blacklist all nodes except the one we are directly connected to and the destination node
           val blacklist = hops.map(_.nextNodeId).drop(1).dropRight(1)
           log.warning(s"blacklisting intermediate nodes=${blacklist.mkString(",")}")
-          router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes ++ blacklist, ignoreChannels, c.routeParams)
+          router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes ++ blacklist, ignoreChannels, c.routeParams)
           goto(WAITING_FOR_ROUTE) using WaitingForRoute(s, c, failures :+ UnreadableRemoteFailure(hops))
         case Success(e@Sphinx.DecryptedFailurePacket(nodeId, failureMessage: Node)) =>
           log.info(s"received 'Node' type error message from nodeId=$nodeId, trying to route around it (failure=$failureMessage)")
           // let's try to route around this node
-          router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes + nodeId, ignoreChannels, c.routeParams)
+          router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes + nodeId, ignoreChannels, c.routeParams)
           goto(WAITING_FOR_ROUTE) using WaitingForRoute(s, c, failures :+ RemoteFailure(hops, e))
         case Success(e@Sphinx.DecryptedFailurePacket(nodeId, failureMessage: Update)) =>
           log.info(s"received 'Update' type error message from nodeId=$nodeId, retrying payment (failure=$failureMessage)")
@@ -141,18 +142,18 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
             // in any case, we forward the update to the router
             router ! failureMessage.update
             // let's try again, router will have updated its state
-            router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels, c.routeParams)
+            router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels, c.routeParams)
           } else {
             // this node is fishy, it gave us a bad sig!! let's filter it out
             log.warning(s"got bad signature from node=$nodeId update=${failureMessage.update}")
-            router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes + nodeId, ignoreChannels, c.routeParams)
+            router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes + nodeId, ignoreChannels, c.routeParams)
           }
           goto(WAITING_FOR_ROUTE) using WaitingForRoute(s, c, failures :+ RemoteFailure(hops, e))
         case Success(e@Sphinx.DecryptedFailurePacket(nodeId, failureMessage)) =>
           log.info(s"received an error message from nodeId=$nodeId, trying to use a different channel (failure=$failureMessage)")
           // let's try again without the channel outgoing from nodeId
           val faultyChannel = hops.find(_.nodeId == nodeId).map(hop => ChannelDesc(hop.lastUpdate.shortChannelId, hop.nodeId, hop.nextNodeId))
-          router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels ++ faultyChannel.toSet, c.routeParams)
+          router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels ++ faultyChannel.toSet, c.routeParams)
           goto(WAITING_FOR_ROUTE) using WaitingForRoute(s, c, failures :+ RemoteFailure(hops, e))
       }
 
@@ -172,7 +173,7 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
       } else {
         log.info(s"received an error message from local, trying to use a different channel (failure=${t.getMessage})")
         val faultyChannel = ChannelDesc(hops.head.lastUpdate.shortChannelId, hops.head.nodeId, hops.head.nextNodeId)
-        router ! RouteRequest(nodeParams.nodeId, c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels + faultyChannel, c.routeParams)
+        router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, ignoreNodes, ignoreChannels + faultyChannel, c.routeParams)
         goto(WAITING_FOR_ROUTE) using WaitingForRoute(s, c, failures :+ LocalFailure(t))
       }
 
@@ -211,8 +212,15 @@ object PaymentLifecycle {
                          maxAttempts: Int,
                          paymentOptions: PaymentOptions,
                          assistedRoutes: Seq[Seq[ExtraHop]] = Nil,
-                         routeParams: Option[RouteParams] = None) {
+                         routeParams: Option[RouteParams] = None,
+                         routePrefix: Seq[Hop] = Nil) {
     require(paymentOptions.finalAmountMsat > 0, s"amountMsat must be > 0")
+
+    def getRouteStart(nodeParams: NodeParams): PublicKey = routePrefix match {
+      case Nil => nodeParams.nodeId
+      case prefix => prefix.last.nextNodeId
+    }
+
   }
 
   sealed trait PaymentResult

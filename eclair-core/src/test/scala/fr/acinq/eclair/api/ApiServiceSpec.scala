@@ -39,6 +39,7 @@ import org.json4s.jackson.Serialization
 import org.mockito.scalatest.IdiomaticMockito
 import org.scalatest.{FunSuite, Matchers}
 import scodec.bits._
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.io.Source
@@ -254,13 +255,12 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
       }
   }
 
-
   test("'send' method should correctly forward amount parameters to EclairImpl") {
 
     val invoice = "lnbc12580n1pw2ywztpp554ganw404sh4yjkwnysgn3wjcxfcq7gtx53gxczkjr9nlpc3hzvqdq2wpskwctddyxqr4rqrzjqwryaup9lh50kkranzgcdnn2fgvx390wgj5jd07rwr3vxeje0glc7z9rtvqqwngqqqqqqqlgqqqqqeqqjqrrt8smgjvfj7sg38dwtr9kc9gg3era9k3t2hvq3cup0jvsrtrxuplevqgfhd3rzvhulgcxj97yjuj8gdx8mllwj4wzjd8gdjhpz3lpqqvk2plh"
 
     val eclair = mock[Eclair]
-    eclair.send(any, any, any, any, any, any, any, any)(any[Timeout]) returns Future.successful(UUID.randomUUID())
+    eclair.send(any, any, any, any, any, any, any, any, any, any)(any[Timeout]) returns Future.successful(UUID.randomUUID())
     val mockService = new MockService(eclair)
 
     Post("/payinvoice", FormData("invoice" -> invoice).toEntity) ~>
@@ -269,9 +269,8 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
       check {
         assert(handled)
         assert(status == OK)
-        eclair.send(any, 1258000, any, any, any, any, any, any)(any[Timeout]).wasCalled(once)
+        eclair.send(any, 1258000, any, any, any, any, any, any, Some(false), any)(any[Timeout]).wasCalled(once)
       }
-
 
     Post("/payinvoice", FormData("invoice" -> invoice, "amountMsat" -> "123", "feeThresholdSat" -> "112233", "maxFeePct" -> "2.34").toEntity) ~>
       addCredentials(BasicHttpCredentials("", mockService.password)) ~>
@@ -279,7 +278,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
       check {
         assert(handled)
         assert(status == OK)
-        eclair.send(any, 123, any, any, any, any, Some(112233), Some(2.34))(any[Timeout]).wasCalled(once)
+        eclair.send(any, 123, any, any, any, any, Some(112233), Some(2.34), Some(false), any)(any[Timeout]).wasCalled(once)
       }
 
   }
@@ -302,7 +301,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
       }
   }
 
-  test("'sendtoroute' method should accept a both a json-encoded AND comma separaterd list of pubkeys") {
+  test("'sendtoroute' method should accept a both a json-encoded AND comma separated list of pubkeys") {
 
     val rawUUID = "487da196-a4dc-4b1e-92b4-3e5e905e9f3f"
     val paymentUUID = UUID.fromString(rawUUID)
@@ -311,10 +310,10 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
     val jsonNodes = serialization.write(expectedRoute)
 
     val eclair = mock[Eclair]
-    eclair.sendToRoute(any[List[PublicKey]], anyLong, any[ByteVector32], anyLong)(any[Timeout]) returns Future.successful(paymentUUID)
+    eclair.sendToRoute(any[List[PublicKey]], anyLong, any[ByteVector32], anyLong, any)(any[Timeout]) returns Future.successful(paymentUUID)
     val mockService = new MockService(eclair)
 
-    Post("/sendtoroute", FormData("route" -> jsonNodes, "amountMsat" -> "1234", "paymentHash" -> ByteVector32.Zeroes.toHex, "finalCltvExpiry" -> "190").toEntity) ~>
+    Post("/sendtoroute", FormData("route" -> jsonNodes, "amountMsat" -> "1234", "paymentHash" -> ByteVector32.Zeroes.toHex, "finalCltvExpiry" -> "190", "multiPartTotalAmountMsat" -> "1235").toEntity) ~>
       addCredentials(BasicHttpCredentials("", mockService.password)) ~>
       addHeader("Content-Type", "application/json") ~>
       Route.seal(mockService.route) ~>
@@ -322,7 +321,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
         assert(handled)
         assert(status == OK)
         assert(entityAs[String] == "\""+rawUUID+"\"")
-        eclair.sendToRoute(expectedRoute, 1234, ByteVector32.Zeroes, 190)(any[Timeout]).wasCalled(once)
+        eclair.sendToRoute(expectedRoute, 1234, ByteVector32.Zeroes, 190, Some(1235))(any[Timeout]).wasCalled(once)
       }
 
     // this test uses CSV encoded route
@@ -334,7 +333,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
         assert(handled)
         assert(status == OK)
         assert(entityAs[String] == "\""+rawUUID+"\"")
-        eclair.sendToRoute(expectedRoute, 1234, ByteVector32.One, 190)(any[Timeout]).wasCalled(once)
+        eclair.sendToRoute(expectedRoute, 1234, ByteVector32.One, 190, None)(any[Timeout]).wasCalled(once)
       }
   }
 
@@ -369,7 +368,7 @@ class ApiServiceSpec extends FunSuite with ScalatestRouteTest with IdiomaticMock
         wsClient.expectMessage(expectedSerializedPrel)
 
         val precv = PaymentReceived(amount = MilliSatoshi(21), paymentHash = ByteVector32.Zeroes, timestamp = 1553784963659L)
-        val expectedSerializedPrecv = """{"type":"payment-received","amount":21,"paymentHash":"0000000000000000000000000000000000000000000000000000000000000000","fromChannelId":"0100000000000000000000000000000000000000000000000000000000000000","timestamp":1553784963659}"""
+        val expectedSerializedPrecv = """{"type":"payment-received","amount":21,"paymentHash":"0000000000000000000000000000000000000000000000000000000000000000","timestamp":1553784963659}"""
         Serialization.write(precv)(mockService.formatsWithTypeHint) === expectedSerializedPrecv
         system.eventStream.publish(precv)
         wsClient.expectMessage(expectedSerializedPrecv)
