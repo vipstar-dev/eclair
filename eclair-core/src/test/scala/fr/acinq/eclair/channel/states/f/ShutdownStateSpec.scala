@@ -55,8 +55,8 @@ class ShutdownStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
       // alice sends an HTLC to bob
       val h1 = Crypto.sha256(r1)
       val amount1 = 300000000
-      val expiry1 = 400144
-      val cmd1 = PaymentLifecycle.buildCommand(UUID.randomUUID, amount1, expiry1, h1, Hop(null, TestConstants.Bob.nodeParams.nodeId, null) :: Nil)._1.copy(commit = false)
+      val expiry1 = 144
+      val cmd1 = PaymentLifecycle.buildCommand(UUID.randomUUID, h1, Hop(null, TestConstants.Bob.nodeParams.nodeId, null) :: Nil, PaymentLifecycle.LegacyPayload(amount1, expiry1))._1.copy(commit = false)
       sender.send(alice, cmd1)
       sender.expectMsg("ok")
       val htlc1 = alice2bob.expectMsgType[UpdateAddHtlc]
@@ -65,8 +65,8 @@ class ShutdownStateSpec extends TestkitBaseClass with StateTestsHelperMethods {
       // alice sends another HTLC to bob
       val h2 = Crypto.sha256(r2)
       val amount2 = 200000000
-      val expiry2 = 400144
-      val cmd2 = PaymentLifecycle.buildCommand(UUID.randomUUID, amount2, expiry2, h2, Hop(null, TestConstants.Bob.nodeParams.nodeId, null) :: Nil)._1.copy(commit = false)
+      val expiry2 = 144
+      val cmd2 = PaymentLifecycle.buildCommand(UUID.randomUUID, h2, Hop(null, TestConstants.Bob.nodeParams.nodeId, null) :: Nil, PaymentLifecycle.LegacyPayload(amount2, expiry2))._1.copy(commit = false)
       sender.send(alice, cmd2)
       sender.expectMsg("ok")
       val htlc2 = alice2bob.expectMsgType[UpdateAddHtlc]

@@ -23,20 +23,21 @@ import akka.pattern._
 import akka.util.Timeout
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi, Satoshi}
+import fr.acinq.eclair.TimestampQueryFilters._
 import fr.acinq.eclair.channel.Register.{Forward, ForwardShortId}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.{IncomingPayment, NetworkFee, OutgoingPayment, Stats}
 import fr.acinq.eclair.io.Peer.{GetPeerInfo, PeerInfo}
 import fr.acinq.eclair.io.{NodeURI, Peer}
-import fr.acinq.eclair.payment.PaymentLifecycle._
+import fr.acinq.eclair.payment.PaymentInitiator.SendPaymentRequest
+import fr.acinq.eclair.payment.PaymentLifecycle.ReceivePayment
+import fr.acinq.eclair.payment._
 import fr.acinq.eclair.router.{ChannelDesc, RouteRequest, RouteResponse, Router}
+import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, NodeAnnouncement}
 import scodec.bits.ByteVector
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
-import fr.acinq.eclair.payment.{GetUsableBalances, PaymentReceived, PaymentRelayed, PaymentRequest, PaymentSent, UsableBalances}
-import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, NodeAnnouncement}
-import TimestampQueryFilters._
+import scala.concurrent.{ExecutionContextExecutor, Future}
 
 case class GetInfoResponse(nodeId: PublicKey, alias: String, chainHash: ByteVector32, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 
@@ -111,7 +112,7 @@ trait Eclair {
 
 class EclairImpl(appKit: Kit) extends Eclair {
 
-  implicit val ec = appKit.system.dispatcher
+  implicit val ec: ExecutionContextExecutor = appKit.system.dispatcher
 
   override def connect(target: Either[NodeURI, PublicKey])(implicit timeout: Timeout): Future[String] = target match {
     case Left(uri) => (appKit.switchboard ? Peer.Connect(uri)).mapTo[String]
@@ -187,7 +188,7 @@ class EclairImpl(appKit: Kit) extends Eclair {
   }
 
   override def sendToRoute(route: Seq[PublicKey], amountMsat: Long, paymentHash: ByteVector32, finalCltvExpiry: Long)(implicit timeout: Timeout): Future[UUID] = {
-    (appKit.paymentInitiator ? SendPaymentToRoute(amountMsat, paymentHash, route, finalCltvExpiry)).mapTo[UUID]
+    (appKit.paymentInitiator ? SendPaymentRequest(amountMsat, paymentHash, route.last, 1, route, finalCltvExpiry = finalCltvExpiry)).mapTo[UUID]
   }
 
   override def send(recipientNodeId: PublicKey, amountMsat: Long, paymentHash: ByteVector32, assistedRoutes: Seq[Seq[PaymentRequest.ExtraHop]] = Seq.empty, minFinalCltvExpiry_opt: Option[Long], maxAttempts_opt: Option[Int], feeThresholdSat_opt: Option[Long], maxFeePct_opt: Option[Double])(implicit timeout: Timeout): Future[UUID] = {
@@ -200,8 +201,8 @@ class EclairImpl(appKit: Kit) extends Eclair {
     )
 
     val sendPayment = minFinalCltvExpiry_opt match {
-      case Some(minCltv) => SendPayment(amountMsat, paymentHash, recipientNodeId, assistedRoutes, finalCltvExpiry = minCltv, maxAttempts = maxAttempts, routeParams = Some(routeParams))
-      case None => SendPayment(amountMsat, paymentHash, recipientNodeId, assistedRoutes, maxAttempts = maxAttempts, routeParams = Some(routeParams))
+      case Some(minCltv) => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, finalCltvExpiry = minCltv, routeParams = Some(routeParams))
+      case None => SendPaymentRequest(amountMsat, paymentHash, recipientNodeId, maxAttempts, assistedRoutes = assistedRoutes, routeParams = Some(routeParams))
     }
     (appKit.paymentInitiator ? sendPayment).mapTo[UUID]
   }
@@ -252,12 +253,10 @@ class EclairImpl(appKit: Kit) extends Eclair {
   }
 
   /**
-    * Sends a request to a channel and expects a response
-    *
-    * @param channelIdentifier either a shortChannelId (BOLT encoded) or a channelId (32-byte hex encoded)
-    * @param request
-    * @return
-    */
+   * Sends a request to a channel and expects a response
+   *
+   * @param channelIdentifier either a shortChannelId (BOLT encoded) or a channelId (32-byte hex encoded)
+   */
   def sendToChannel(channelIdentifier: Either[ByteVector32, ShortChannelId], request: Any)(implicit timeout: Timeout): Future[Any] = channelIdentifier match {
     case Left(channelId) => appKit.register ? Forward(channelId, request)
     case Right(shortChannelId) => appKit.register ? ForwardShortId(shortChannelId, request)

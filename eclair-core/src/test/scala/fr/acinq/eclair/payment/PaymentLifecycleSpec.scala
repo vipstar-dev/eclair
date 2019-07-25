@@ -26,7 +26,7 @@ import fr.acinq.bitcoin.{Block, ByteVector32, MilliSatoshi, Satoshi, Transaction
 import fr.acinq.eclair._
 import fr.acinq.eclair.blockchain.{UtxoStatus, ValidateRequest, ValidateResult, WatchSpentBasic}
 import fr.acinq.eclair.channel.Register.ForwardShortId
-import fr.acinq.eclair.channel.{AddHtlcFailed, ChannelUnavailable}
+import fr.acinq.eclair.channel.{AddHtlcFailed, Channel, ChannelUnavailable}
 import fr.acinq.eclair.crypto.Sphinx
 import fr.acinq.eclair.db.OutgoingPaymentStatus
 import fr.acinq.eclair.io.Peer.PeerRoutingMessage
@@ -44,6 +44,7 @@ import scodec.bits.HexStringSyntax
 class PaymentLifecycleSpec extends BaseRouterSpec {
 
   val defaultAmountMsat = 142000000L
+  val defaultExpiry = Channel.MIN_CLTV_EXPIRY
 
   test("send to route") { fixture =>
     import fixture._
@@ -61,7 +62,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
     // pre-computed route going from A to D
-    val request = SendPaymentToRoute(defaultAmountMsat, defaultPaymentHash, Seq(a,b,c,d))
+    val request = SendPaymentToRoute(defaultPaymentHash, Seq(a,b,c,d), LegacyPayload(defaultAmountMsat, defaultExpiry))
 
     sender.send(paymentFSM, request)
     val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
@@ -87,7 +88,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, defaultPaymentHash, f, maxAttempts = 5)
+    val request = SendPayment(defaultPaymentHash, f, maxAttempts = 5, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
     val routeRequest = routerForwarder.expectMsgType[RouteRequest]
@@ -110,7 +111,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, randomBytes32, d, routeParams = Some(RouteParams(randomize = false, maxFeeBaseMsat = 100, maxFeePct = 0.0, routeMaxLength = 20, routeMaxCltv = 2016, ratios = None)), maxAttempts = 5)
+    val request = SendPayment(randomBytes32, d, maxAttempts = 5, LegacyPayload(defaultAmountMsat, defaultExpiry), routeParams = Some(RouteParams(randomize = false, maxFeeBaseMsat = 100, maxFeePct = 0.0, routeMaxLength = 20, routeMaxCltv = 2016, ratios = None)))
     sender.send(paymentFSM, request)
     val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
 
@@ -133,7 +134,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, defaultPaymentHash, d, maxAttempts = 2)
+    val request = SendPayment(defaultPaymentHash, d, maxAttempts = 2, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE && paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
 
@@ -176,7 +177,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, randomBytes32, d, maxAttempts = 2)
+    val request = SendPayment(randomBytes32, d, maxAttempts = 2, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE && paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
 
@@ -209,7 +210,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, defaultPaymentHash, d, maxAttempts = 2)
+    val request = SendPayment(defaultPaymentHash, d, maxAttempts = 2, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE && paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
 
@@ -240,7 +241,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, randomBytes32, d, maxAttempts = 2)
+    val request = SendPayment(randomBytes32, d, maxAttempts = 2, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE)
     val WaitingForRoute(_, _, Nil) = paymentFSM.stateData
@@ -280,7 +281,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, randomBytes32, d, maxAttempts = 5)
+    val request = SendPayment(randomBytes32, d, maxAttempts = 5, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE && paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
 
@@ -342,7 +343,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, randomBytes32, d, maxAttempts = 2)
+    val request = SendPayment(randomBytes32, d, maxAttempts = 2, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     awaitCond(paymentFSM.stateName == WAITING_FOR_ROUTE && paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
 
@@ -382,7 +383,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
-    val request = SendPayment(defaultAmountMsat, defaultPaymentHash, d, maxAttempts = 5)
+    val request = SendPayment(defaultPaymentHash, d, maxAttempts = 5, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
     val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
     val Transition(_, WAITING_FOR_ROUTE, WAITING_FOR_PAYMENT_COMPLETE) = monitor.expectMsgClass(classOf[Transition[_]])
@@ -390,9 +391,9 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     sender.send(paymentFSM, UpdateFulfillHtlc(ByteVector32.Zeroes, 0, defaultPaymentHash))
 
     val paymentOK = sender.expectMsgType[PaymentSucceeded]
-    val PaymentSent(_, MilliSatoshi(request.amountMsat), fee, request.paymentHash, paymentOK.paymentPreimage, _, _) = eventListener.expectMsgType[PaymentSent]
+    val PaymentSent(_, MilliSatoshi(request.paymentOptions.finalAmountMsat), fee, request.paymentHash, paymentOK.paymentPreimage, _, _) = eventListener.expectMsgType[PaymentSent]
     assert(fee > MilliSatoshi(0))
-    assert(fee === MilliSatoshi(paymentOK.amountMsat - request.amountMsat))
+    assert(fee === MilliSatoshi(paymentOK.amountMsat - request.paymentOptions.finalAmountMsat))
     awaitCond(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.SUCCEEDED))
   }
 
@@ -432,7 +433,7 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
 
     // we send a payment to G which is just after the
-    val request = SendPayment(defaultAmountMsat, defaultPaymentHash, g, maxAttempts = 5)
+    val request = SendPayment(defaultPaymentHash, g, maxAttempts = 5, LegacyPayload(defaultAmountMsat, defaultExpiry))
     sender.send(paymentFSM, request)
 
     // the route will be A -> B -> G where B -> G has a channel_update with fees=0
@@ -442,13 +443,13 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     sender.send(paymentFSM, UpdateFulfillHtlc(ByteVector32.Zeroes, 0, defaultPaymentHash))
 
     val paymentOK = sender.expectMsgType[PaymentSucceeded]
-    val PaymentSent(_, MilliSatoshi(request.amountMsat), fee, request.paymentHash, paymentOK.paymentPreimage, _, _) = eventListener.expectMsgType[PaymentSent]
+    val PaymentSent(_, MilliSatoshi(request.paymentOptions.finalAmountMsat), fee, request.paymentHash, paymentOK.paymentPreimage, _, _) = eventListener.expectMsgType[PaymentSent]
 
     // during the route computation the fees were treated as if they were 1msat but when sending the onion we actually put zero
     // NB: A -> B doesn't pay fees because it's our direct neighbor
     // NB: B -> G doesn't asks for fees at all
     assert(fee === MilliSatoshi(0))
-    assert(fee === MilliSatoshi(paymentOK.amountMsat - request.amountMsat))
+    assert(fee === MilliSatoshi(paymentOK.amountMsat - request.paymentOptions.finalAmountMsat))
   }
 
   test("filter errors properly") { _ =>
