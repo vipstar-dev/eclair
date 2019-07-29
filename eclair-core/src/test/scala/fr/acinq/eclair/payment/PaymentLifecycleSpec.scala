@@ -37,6 +37,8 @@ import fr.acinq.eclair.transactions.Scripts
 import fr.acinq.eclair.wire._
 import scodec.bits.HexStringSyntax
 
+import scala.concurrent.duration._
+
 /**
   * Created by PM on 29/08/2016.
   */
@@ -121,6 +123,29 @@ class PaymentLifecycleSpec extends BaseRouterSpec {
     router.expectMsg(RouteRequest(c, d, defaultAmountMsat, ignoreChannels = Set(ChannelDesc(channelUpdate_ab.shortChannelId, a, b))))
     val Transition(_, WAITING_FOR_PAYMENT_COMPLETE, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
     assert(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
+  }
+
+  test("send with full route in route prefix") { _ =>
+    val nodeParams = TestConstants.Alice.nodeParams.copy(keyManager = testKeyManager)
+    val paymentDb = nodeParams.db.payments
+    val id = UUID.randomUUID()
+    val router = TestProbe()
+    val paymentFSM = system.actorOf(PaymentLifecycle.props(nodeParams, id, router.ref, TestProbe().ref))
+    val monitor = TestProbe()
+    val sender = TestProbe()
+
+    paymentFSM ! SubscribeTransitionCallBack(monitor.ref)
+    val CurrentState(_, WAITING_FOR_REQUEST) = monitor.expectMsgClass(classOf[CurrentState[_]])
+
+    // If we know the full route we want to use (a -> b -> c), we don't need to call the router at all.
+    val request = SendPayment(randomBytes32, c, maxAttempts = 3, LegacyPayload(defaultAmountMsat, defaultExpiry), routePrefix = Seq(Hop(a, b, channelUpdate_ab), Hop(b, c, channelUpdate_bc)))
+    sender.send(paymentFSM, request)
+    router.expectNoMsg(100 millis)
+    val Transition(_, WAITING_FOR_REQUEST, WAITING_FOR_ROUTE) = monitor.expectMsgClass(classOf[Transition[_]])
+    awaitCond(paymentDb.getOutgoingPayment(id).exists(_.status == OutgoingPaymentStatus.PENDING))
+
+    // The payment FSM should send the payment without interacting with the router.
+    val Transition(_, WAITING_FOR_ROUTE, WAITING_FOR_PAYMENT_COMPLETE) = monitor.expectMsgClass(classOf[Transition[_]])
   }
 
   test("payment failed (route not found)") { fixture =>

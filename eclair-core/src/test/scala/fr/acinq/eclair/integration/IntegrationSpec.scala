@@ -32,6 +32,7 @@ import fr.acinq.eclair.channel.Channel.{BroadcastChannelUpdate, PeriodicRefresh}
 import fr.acinq.eclair.channel.Register.{Forward, ForwardShortId}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.Sphinx.DecryptedFailurePacket
+import fr.acinq.eclair.db.OutgoingPaymentStatus
 import fr.acinq.eclair.io.Peer
 import fr.acinq.eclair.io.Peer.{Disconnect, PeerRoutingMessage}
 import fr.acinq.eclair.payment.PaymentInitiator.SendPaymentRequest
@@ -87,6 +88,8 @@ class IntegrationSpec extends TestKit(ActorSystem("test")) with BitcoindService 
     "eclair.mindepth-blocks" -> 2,
     "eclair.max-htlc-value-in-flight-msat" -> 100000000000L,
     "eclair.router.broadcast-interval" -> "2 second",
+    "eclair.router.path-finding.multi-part-min-share-sat" -> 1000L,
+    "eclair.router.path-finding.multi-part-threshold-sat" -> 5000L,
     "eclair.auto-reconnect" -> false,
     "eclair.to-remote-delay-blocks" -> 144))
 
@@ -152,7 +155,7 @@ class IntegrationSpec extends TestKit(ActorSystem("test")) with BitcoindService 
     instantiateEclairNode("F5", ConfigFactory.parseMap(Map("eclair.node-alias" -> "F5", "eclair.expiry-delta-blocks" -> 139, "eclair.server.port" -> 29739, "eclair.api.port" -> 28089, "eclair.payment-handler" -> "noop")).withFallback(commonConfig))
     instantiateEclairNode("G", ConfigFactory.parseMap(Map("eclair.node-alias" -> "G", "eclair.expiry-delta-blocks" -> 140, "eclair.server.port" -> 29740, "eclair.api.port" -> 28090, "eclair.fee-base-msat" -> 1010, "eclair.fee-proportional-millionths" -> 102)).withFallback(commonConfig))
 
-    // by default C has a normal payment handler, but this can be overriden in tests
+    // by default C has a normal payment handler, but this can be overridden in tests
     val paymentHandlerC = nodes("C").system.actorOf(LocalPaymentHandler.props(nodes("C").nodeParams))
     nodes("C").paymentHandler ! paymentHandlerC
   }
@@ -433,10 +436,29 @@ class IntegrationSpec extends TestKit(ActorSystem("test")) with BitcoindService 
     }, max = 30 seconds, interval = 10 seconds)
   }
 
+  test("send an HTLC B->D using multi-part payment") {
+    val sender = TestProbe()
+    val amountMsat = MilliSatoshi(10000000)
+    sender.send(nodes("D").paymentHandler, ReceivePayment(Some(amountMsat), "split the restaurant bill", allowMultiPart = true))
+    val pr = sender.expectMsgType[PaymentRequest](15 seconds)
+    assert(pr.features.allowMultiPart)
+
+    sender.send(nodes("B").paymentInitiator, SendPaymentRequest(amountMsat.amount, pr.paymentHash, nodes("D").nodeParams.nodeId, maxAttempts = 5, allowMultiPart = true))
+    val paymentId = sender.expectMsgType[UUID](30 seconds)
+    assert(sender.expectMsgType[PaymentSucceeded](30 seconds).id === paymentId)
+
+    // Verify that B sent multiple partial payments.
+    awaitCond(nodes("B").nodeParams.db.payments.getOutgoingPayments(pr.paymentHash).forall(_.status != OutgoingPaymentStatus.PENDING))
+    val payments = nodes("B").nodeParams.db.payments.getOutgoingPayments(pr.paymentHash)
+    assert(payments.forall(_.status == OutgoingPaymentStatus.SUCCEEDED))
+    val partialPayments = payments.filter(_.id != paymentId)
+    assert(partialPayments.length > 1)
+    assert(partialPayments.map(_.amountMsat).sum === amountMsat.amount)
+  }
 
   /**
-    * We currently use p2pkh script Helpers.getFinalScriptPubKey
-    */
+   * We currently use p2pkh script Helpers.getFinalScriptPubKey
+   */
   def scriptPubKeyToAddress(scriptPubKey: ByteVector) = Script.parse(scriptPubKey) match {
     case OP_DUP :: OP_HASH160 :: OP_PUSHDATA(pubKeyHash, _) :: OP_EQUALVERIFY :: OP_CHECKSIG :: Nil =>
       Base58Check.encode(Base58.Prefix.PubkeyAddressTestnet, pubKeyHash)

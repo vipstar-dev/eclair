@@ -53,7 +53,9 @@ case class RouterConf(randomizeRouteSelection: Boolean,
                       searchHeuristicsEnabled: Boolean,
                       searchRatioCltv: Double,
                       searchRatioChannelAge: Double,
-                      searchRatioChannelCapacity: Double)
+                      searchRatioChannelCapacity: Double,
+                      multiPartMinShareMsat: Long,
+                      multiPartThresholdMsat: Long)
 
 case class ChannelDesc(shortChannelId: ShortChannelId, a: PublicKey, b: PublicKey)
 case class Hop(nodeId: PublicKey, nextNodeId: PublicKey, lastUpdate: ChannelUpdate)
@@ -66,9 +68,9 @@ case class RouteRequest(source: PublicKey,
                         ignoreChannels: Set[ChannelDesc] = Set.empty,
                         routeParams: Option[RouteParams] = None)
 
-case class FinalizeRoute(hops:Seq[PublicKey])
-case class RouteResponse(hops: Seq[Hop], ignoreNodes: Set[PublicKey], ignoreChannels: Set[ChannelDesc]) {
-  require(hops.size > 0, "route cannot be empty")
+case class FinalizeRoute(hops: Seq[PublicKey])
+case class RouteResponse(hops: Seq[Hop], ignoreNodes: Set[PublicKey], ignoreChannels: Set[ChannelDesc], allowEmpty: Boolean = false) {
+  require(allowEmpty || hops.nonEmpty, "route cannot be empty")
 }
 case class ExcludeChannel(desc: ChannelDesc) // this is used when we get a TemporaryChannelFailure, to give time for the channel to recover (note that exclusions are directed)
 case class LiftChannelExclusion(desc: ChannelDesc)
@@ -103,8 +105,8 @@ case object TickPruneStaleChannels
 // @formatter:on
 
 /**
-  * Created by PM on 24/05/2016.
-  */
+ * Created by PM on 24/05/2016.
+ */
 
 class Router(nodeParams: NodeParams, watcher: ActorRef, initialized: Option[Promise[Done]] = None) extends FSMDiagnosticActorLogging[State, Data] {
 
@@ -307,10 +309,10 @@ class Router(nodeParams: NodeParams, watcher: ActorRef, initialized: Option[Prom
       // let's clean the db and send the events
       log.info("pruning shortChannelId={} (spent)", shortChannelId)
       db.removeChannel(shortChannelId) // NB: this also removes channel updates
-    // we also need to remove updates from the graph
-    val graph1 = d.graph
-      .removeEdge(ChannelDesc(lostChannel.shortChannelId, lostChannel.nodeId1, lostChannel.nodeId2))
-      .removeEdge(ChannelDesc(lostChannel.shortChannelId, lostChannel.nodeId2, lostChannel.nodeId1))
+      // we also need to remove updates from the graph
+      val graph1 = d.graph
+        .removeEdge(ChannelDesc(lostChannel.shortChannelId, lostChannel.nodeId1, lostChannel.nodeId2))
+        .removeEdge(ChannelDesc(lostChannel.shortChannelId, lostChannel.nodeId2, lostChannel.nodeId1))
 
       context.system.eventStream.publish(ChannelLost(shortChannelId))
       lostNodes.foreach {
@@ -758,16 +760,16 @@ object Router {
   }
 
   /**
-    * Is stale a channel that:
-    * (1) is older than 2 weeks (2*7*144 = 2016 blocks)
-    * AND
-    * (2) has no channel_update younger than 2 weeks
-    *
-    * @param channel
-    * @param update1_opt update corresponding to one side of the channel, if we have it
-    * @param update2_opt update corresponding to the other side of the channel, if we have it
-    * @return
-    */
+   * Is stale a channel that:
+   * (1) is older than 2 weeks (2*7*144 = 2016 blocks)
+   * AND
+   * (2) has no channel_update younger than 2 weeks
+   *
+   * @param channel
+   * @param update1_opt update corresponding to one side of the channel, if we have it
+   * @param update2_opt update corresponding to the other side of the channel, if we have it
+   * @return
+   */
   def isStale(channel: ChannelAnnouncement, update1_opt: Option[ChannelUpdate], update2_opt: Option[ChannelUpdate]): Boolean = {
     // BOLT 7: "nodes MAY prune channels should the timestamp of the latest channel_update be older than 2 weeks (1209600 seconds)"
     // but we don't want to prune brand new channels for which we didn't yet receive a channel update, so we keep them as long as they are less than 2 weeks (2016 blocks) old
@@ -786,8 +788,8 @@ object Router {
   }
 
   /**
-    * Filters channels that we want to send to nodes asking for a channel range
-    */
+   * Filters channels that we want to send to nodes asking for a channel range
+   */
   def keep(firstBlockNum: Long, numberOfBlocks: Long, id: ShortChannelId, channels: Map[ShortChannelId, ChannelAnnouncement], updates: Map[ChannelDesc, ChannelUpdate]): Boolean = {
     val TxCoordinates(height, _, _) = ShortChannelId.coordinates(id)
     height >= firstBlockNum && height <= (firstBlockNum + numberOfBlocks)
@@ -801,8 +803,8 @@ object Router {
     }
 
   /**
-    * This method is used after a payment failed, and we want to exclude some nodes that we know are failing
-    */
+   * This method is used after a payment failed, and we want to exclude some nodes that we know are failing
+   */
   def getIgnoredChannelDesc(updates: Map[ChannelDesc, ChannelUpdate], ignoreNodes: Set[PublicKey]): Iterable[ChannelDesc] = {
     val desc = if (ignoreNodes.isEmpty) {
       Iterable.empty[ChannelDesc]
@@ -814,8 +816,8 @@ object Router {
   }
 
   /**
-    * https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#clarifications
-    */
+   * https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#clarifications
+   */
   val ROUTE_MAX_LENGTH = 20
 
   // Max allowed CLTV for a route
@@ -841,19 +843,19 @@ object Router {
   )
 
   /**
-    * Find a route in the graph between localNodeId and targetNodeId, returns the route.
-    * Will perform a k-shortest path selection given the @param numRoutes and randomly select one of the result.
-    *
-    * @param g
-    * @param localNodeId
-    * @param targetNodeId
-    * @param amountMsat   the amount that will be sent along this route
-    * @param numRoutes    the number of shortest-paths to find
-    * @param extraEdges   a set of extra edges we want to CONSIDER during the search
-    * @param ignoredEdges a set of extra edges we want to IGNORE during the search
-    * @param routeParams  a set of parameters that can restrict the route search
-    * @return the computed route to the destination @targetNodeId
-    */
+   * Find a route in the graph between localNodeId and targetNodeId, returns the route.
+   * Will perform a k-shortest path selection given the @param numRoutes and randomly select one of the result.
+   *
+   * @param g
+   * @param localNodeId
+   * @param targetNodeId
+   * @param amountMsat   the amount that will be sent along this route
+   * @param numRoutes    the number of shortest-paths to find
+   * @param extraEdges   a set of extra edges we want to CONSIDER during the search
+   * @param ignoredEdges a set of extra edges we want to IGNORE during the search
+   * @param routeParams  a set of parameters that can restrict the route search
+   * @return the computed route to the destination @targetNodeId
+   */
   def findRoute(g: DirectedGraph,
                 localNodeId: PublicKey,
                 targetNodeId: PublicKey,

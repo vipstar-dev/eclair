@@ -16,25 +16,24 @@
 
 package fr.acinq.eclair.payment
 
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, FSM, Props}
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
-import fr.acinq.eclair.FSMDiagnosticActorLogging
 import fr.acinq.eclair.channel.{CMD_FAIL_HTLC, CMD_FULFILL_HTLC}
 import fr.acinq.eclair.wire.{IncorrectOrUnknownPaymentDetails, UpdateAddHtlc}
 
 import scala.concurrent.duration.FiniteDuration
 
 /**
-  * Created by t-bast on 18/07/2019.
-  */
+ * Created by t-bast on 18/07/2019.
+ */
 
 /**
-  * Handler for a multi-part payment (see https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#basic-multi-part-payments).
-  * Once all the partial payments are received, all the partial HTLCs are fulfilled.
-  * After a reasonable delay, if not enough partial payments have been received, all the partial HTLCs are failed.
-  * This handler assumes that the parent only sends payments for the same payment hash.
-  */
-class MultiPartPaymentHandler(preimage: ByteVector32, paymentTimeout: FiniteDuration, parent: ActorRef) extends FSMDiagnosticActorLogging[MultiPartPaymentHandler.State, MultiPartPaymentHandler.Data] {
+ * Handler for a multi-part payment (see https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#basic-multi-part-payments).
+ * Once all the partial payments are received, all the partial HTLCs are fulfilled.
+ * After a reasonable delay, if not enough partial payments have been received, all the partial HTLCs are failed.
+ * This handler assumes that the parent only sends payments for the same payment hash.
+ */
+class MultiPartPaymentHandler(preimage: ByteVector32, paymentTimeout: FiniteDuration, parent: ActorRef) extends FSM[MultiPartPaymentHandler.State, MultiPartPaymentHandler.Data] {
 
   import MultiPartPaymentHandler._
 
@@ -61,8 +60,6 @@ class MultiPartPaymentHandler(preimage: ByteVector32, paymentTimeout: FiniteDura
       goto(PAYMENT_FAILED) using PaymentFailed(d.paidAmountMsat, d.htlcIds)
 
     case Event(MultiPartHtlc(totalAmountMsat, htlc), d: WaitingForMoreHtlc) =>
-      cancelTimer(PaymentTimeout.toString)
-      setTimer(PaymentTimeout.toString, PaymentTimeout, paymentTimeout, repeat = false)
       if (totalAmountMsat != d.totalAmountMsat) {
         log.warning(s"multi-part payment totalAmountMsat mismatch: previously ${d.totalAmountMsat}, now $totalAmountMsat")
         goto(PAYMENT_FAILED) using PaymentFailed(d.paidAmountMsat, (htlc.id, sender) :: d.htlcIds)
@@ -81,6 +78,8 @@ class MultiPartPaymentHandler(preimage: ByteVector32, paymentTimeout: FiniteDura
       log.info(s"received extraneous htlc for payment hash ${htlc.paymentHash}")
       sender ! CMD_FULFILL_HTLC(htlc.id, preimage, commit = true)
       stay
+
+    case Event("ok", _) => stay
   }
 
   when(PAYMENT_FAILED) {
@@ -88,6 +87,8 @@ class MultiPartPaymentHandler(preimage: ByteVector32, paymentTimeout: FiniteDura
     case Event(MultiPartHtlc(_, htlc), PaymentFailed(paidAmountMsat, _)) =>
       sender ! CMD_FAIL_HTLC(htlc.id, Right(IncorrectOrUnknownPaymentDetails(paidAmountMsat)), commit = true)
       stay
+
+    case Event("ok", _) => stay
   }
 
   onTransition {

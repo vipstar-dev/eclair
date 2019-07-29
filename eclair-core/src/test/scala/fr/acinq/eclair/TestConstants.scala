@@ -99,7 +99,9 @@ object TestConstants {
         searchHeuristicsEnabled = false,
         searchRatioCltv = 0.0,
         searchRatioChannelAge = 0.0,
-        searchRatioChannelCapacity = 0.0
+        searchRatioChannelCapacity = 0.0,
+        multiPartMinShareMsat = 1000 * 1000,
+        multiPartThresholdMsat = 10000 * 1000
       ),
       socksProxy_opt = None,
       maxPaymentAttempts = 5
@@ -167,7 +169,9 @@ object TestConstants {
         searchHeuristicsEnabled = false,
         searchRatioCltv = 0.0,
         searchRatioChannelAge = 0.0,
-        searchRatioChannelCapacity = 0.0
+        searchRatioChannelCapacity = 0.0,
+        multiPartMinShareMsat = 1000 * 1000,
+        multiPartThresholdMsat = 10000 * 1000
       ),
       socksProxy_opt = None,
       maxPaymentAttempts = 5

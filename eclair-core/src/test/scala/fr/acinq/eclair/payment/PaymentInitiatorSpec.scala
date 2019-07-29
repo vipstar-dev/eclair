@@ -20,11 +20,13 @@ import java.util.UUID
 
 import akka.actor.ActorSystem
 import akka.testkit.{TestActorRef, TestKit, TestProbe}
-import fr.acinq.eclair.channel.{AvailableBalanceChanged, LocalChannelDown, LocalChannelUpdate}
+import fr.acinq.eclair.channel.{AvailableBalanceChanged, Channel, LocalChannelDown, LocalChannelUpdate}
 import fr.acinq.eclair.payment.HtlcGenerationSpec._
 import fr.acinq.eclair.payment.PaymentInitiator.{LocalChannel, SendPaymentRequest}
+import fr.acinq.eclair.payment.PaymentLifecycle.{LegacyPayload, SendPayment, SendPaymentToRoute, TlvPayload}
 import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
-import fr.acinq.eclair.router.{FinalizeRoute, RouteParams, RouteRequest}
+import fr.acinq.eclair.router.RouteParams
+import fr.acinq.eclair.wire.OnionTlv
 import fr.acinq.eclair.{NodeParams, TestConstants, randomBytes32}
 import org.scalatest.{Outcome, fixture}
 
@@ -34,22 +36,35 @@ import org.scalatest.{Outcome, fixture}
 
 class PaymentInitiatorSpec extends TestKit(ActorSystem("test")) with fixture.FunSuiteLike {
 
-  case class FixtureParam(nodeParams: NodeParams, initiator: TestActorRef[PaymentInitiator], router: TestProbe, register: TestProbe, sender: TestProbe)
+  case class FixtureParam(nodeParams: NodeParams, initiator: TestActorRef[PaymentInitiator], payFsm: TestProbe, multiPartPayFsm: TestProbe, sender: TestProbe)
 
   override def withFixture(test: OneArgTest): Outcome = {
     val nodeParams = TestConstants.Alice.nodeParams
-    val router = TestProbe()
-    val register = TestProbe()
     val sender = TestProbe()
-    val initiator = TestActorRef(new PaymentInitiator(nodeParams, router.ref, register.ref))
-    withFixture(test.toNoArgTest(FixtureParam(nodeParams, initiator, router, register, sender)))
+    val payFsm = TestProbe()
+    val multiPartPayFsm = TestProbe()
+    class TestPaymentInitiator extends PaymentInitiator(nodeParams, TestProbe().ref, TestProbe().ref) {
+      // @formatter:off
+      override def spawnPaymentFsm(paymentId: UUID) = payFsm.ref
+      override def spawnMultiPartPaymentFsm(paymentId: UUID) = multiPartPayFsm.ref
+      // @formatter:on
+    }
+    val initiator = TestActorRef(new TestPaymentInitiator().asInstanceOf[PaymentInitiator])
+    withFixture(test.toNoArgTest(FixtureParam(nodeParams, initiator, payFsm, multiPartPayFsm, sender)))
   }
 
   test("forward payment with pre-defined route") { f =>
     import f._
     sender.send(initiator, SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, Seq(a, b, c)))
     sender.expectMsgType[UUID]
-    router.expectMsg(FinalizeRoute(Seq(a, b, c)))
+    payFsm.expectMsg(SendPaymentToRoute(paymentHash, Seq(a, b, c), LegacyPayload(finalAmountMsat, Channel.MIN_CLTV_EXPIRY)))
+  }
+
+  test("forward multi-part payment with pre-defined route") { f =>
+    import f._
+    sender.send(initiator, SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, Seq(a, b, c), allowMultiPart = true, multiPartTotalAmountMsat = Some(finalAmountMsat + 10)))
+    sender.expectMsgType[UUID]
+    payFsm.expectMsg(SendPaymentToRoute(paymentHash, Seq(a, b, c), TlvPayload(finalAmountMsat, Channel.MIN_CLTV_EXPIRY, Seq(OnionTlv.MultiPartPayment(finalAmountMsat + 10)))))
   }
 
   test("forward legacy payment") { f =>
@@ -58,11 +73,24 @@ class PaymentInitiatorSpec extends TestKit(ActorSystem("test")) with fixture.Fun
     val routeParams = RouteParams(randomize = true, 15, 1.5, 5, 561, None)
     sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, assistedRoutes = hints, finalCltvExpiry = 42, routeParams = Some(routeParams)))
     sender.expectMsgType[UUID]
-    router.expectMsg(RouteRequest(TestConstants.Alice.nodeParams.nodeId, c, finalAmountMsat, assistedRoutes = hints, routeParams = Some(routeParams)))
+    payFsm.expectMsg(SendPayment(paymentHash, c, 1, LegacyPayload(finalAmountMsat, 42), hints, Some(routeParams)))
 
     sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, e, 3))
     sender.expectMsgType[UUID]
-    router.expectMsg(RouteRequest(TestConstants.Alice.nodeParams.nodeId, e, finalAmountMsat))
+    payFsm.expectMsg(SendPayment(paymentHash, e, 3, LegacyPayload(finalAmountMsat, Channel.MIN_CLTV_EXPIRY)))
+  }
+
+  test("forward multi-part payment") { f =>
+    import f._
+    val hints = Seq(Seq(ExtraHop(b, channelUpdate_bc.shortChannelId, feeBaseMsat = 10, feeProportionalMillionths = 1, cltvExpiryDelta = 12)))
+    val routeParams = RouteParams(randomize = true, 15, 1.5, 5, 561, None)
+    sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, c, 1, assistedRoutes = hints, finalCltvExpiry = 42, routeParams = Some(routeParams), allowMultiPart = true, multiPartTotalAmountMsat = Some(finalAmountMsat + 100)))
+    sender.expectMsgType[UUID]
+    multiPartPayFsm.expectMsg(SendPayment(paymentHash, c, 1, TlvPayload(finalAmountMsat, 42, Seq(OnionTlv.MultiPartPayment(finalAmountMsat + 100))), hints, Some(routeParams)))
+
+    sender.send(initiator, PaymentInitiator.SendPaymentRequest(finalAmountMsat, paymentHash, e, 3, allowMultiPart = true))
+    sender.expectMsgType[UUID]
+    multiPartPayFsm.expectMsg(SendPayment(paymentHash, e, 3, TlvPayload(finalAmountMsat, Channel.MIN_CLTV_EXPIRY, Seq(OnionTlv.MultiPartPayment(finalAmountMsat)))))
   }
 
   test("handle channel events") { f =>

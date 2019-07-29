@@ -92,20 +92,6 @@ class MultiPartPaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunS
     parent.expectMsg(MultiPartHtlcFailed(paymentPreimage))
   }
 
-  test("restart timeout window when receiving partial payments") {
-    val parent = TestProbe()
-    val handler = TestFSMRef(new MultiPartPaymentHandler(paymentPreimage, 25 millis, parent.ref))
-    val sender = TestProbe()
-
-    handler.cancelTimer(PaymentTimeout.toString)
-    sender.send(handler, createMultiPartHtlc(1000, 600, 1))
-    awaitCond(handler.isTimerActive(PaymentTimeout.toString))
-
-    handler.cancelTimer(PaymentTimeout.toString)
-    sender.send(handler, createMultiPartHtlc(1000, 200, 2))
-    awaitCond(handler.isTimerActive(PaymentTimeout.toString))
-  }
-
   test("fulfill all when total amount reached") {
     val parent = TestProbe()
     val handler = TestActorRef[MultiPartPaymentHandler](props(paymentPreimage, 10 seconds, parent.ref))

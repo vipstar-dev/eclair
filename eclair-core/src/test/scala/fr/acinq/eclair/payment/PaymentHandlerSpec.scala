@@ -275,6 +275,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
 
     sender1.expectMsg(CMD_FAIL_HTLC(0, Right(IncorrectOrUnknownPaymentDetails(800)), commit = true))
     sender2.expectMsg(CMD_FAIL_HTLC(1, Right(IncorrectOrUnknownPaymentDetails(1000)), commit = true))
+    awaitCond(handler.underlyingActor.multiPartPayments.isEmpty)
   }
 
   test("LocalPaymentHandler should handle multi-part payment success") {
@@ -304,10 +305,11 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
     val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
     assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(MilliSatoshi(1000), pr.paymentHash, timestamp = 0))
     assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
+    awaitCond(handler.underlyingActor.multiPartPayments.isEmpty)
   }
 
   test("LocalPaymentHandler should handle multi-part payment timeout then success") {
-    val nodeParams = Alice.nodeParams.copy(multiPartPaymentExpiry = 100 millis)
+    val nodeParams = Alice.nodeParams.copy(multiPartPaymentExpiry = 500 millis)
     val handler = TestActorRef[LocalPaymentHandler](LocalPaymentHandler.props(nodeParams))
     val sender = TestProbe()
 
@@ -320,6 +322,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
     val add1 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(1)), 0, 800, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add1, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
     sender.expectMsg(CMD_FAIL_HTLC(0, Right(IncorrectOrUnknownPaymentDetails(800)), commit = true))
+    awaitCond(handler.underlyingActor.multiPartPayments.isEmpty)
 
     val add2 = UpdateAddHtlc(ByteVector32(ByteVector.fill(32)(2)), 2, 300, pr.paymentHash, Globals.blockCount.get() + 12, TestConstants.emptyOnionPacket)
     sender.send(handler, DecryptedHtlc(add2, TlvStream[OnionTlv](OnionTlv.MultiPartPayment(1000))))
@@ -336,6 +339,7 @@ class PaymentHandlerSpec extends TestKit(ActorSystem("test")) with FunSuiteLike 
     val paymentRelayed = eventListener.expectMsgType[PaymentReceived]
     assert(paymentRelayed.copy(timestamp = 0) === PaymentReceived(MilliSatoshi(1000), pr.paymentHash, timestamp = 0))
     assert(nodeParams.db.payments.getIncomingPayment(pr.paymentHash).exists(_.paymentHash == pr.paymentHash))
+    awaitCond(handler.underlyingActor.multiPartPayments.isEmpty)
   }
 
 }

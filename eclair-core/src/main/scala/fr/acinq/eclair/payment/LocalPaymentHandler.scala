@@ -29,12 +29,12 @@ import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
 /**
-  * Simple payment handler that generates payment requests and fulfills incoming htlcs.
-  *
-  * Note that unfulfilled payment requests are kept forever if they don't have an expiry!
-  *
-  * Created by PM on 17/06/2016.
-  */
+ * Simple payment handler that generates payment requests and fulfills incoming htlcs.
+ *
+ * Note that unfulfilled payment requests are kept forever if they don't have an expiry!
+ *
+ * Created by PM on 17/06/2016.
+ */
 class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLogging {
 
   import LocalPaymentHandler._
@@ -100,6 +100,7 @@ class LocalPaymentHandler(nodeParams: NodeParams) extends Actor with ActorLoggin
       val paymentHash = Crypto.sha256(paymentPreimage)
       log.info(s"received complete multi-part payment for paymentHash=$paymentHash amountMsat=${paidAmount.amount}")
       multiPartPayments.get(paymentHash).foreach(h => h ! PoisonPill)
+      multiPartPayments = multiPartPayments - paymentHash
       nodeParams.db.payments.addIncomingPayment(IncomingPayment(paymentHash, paidAmount.amount, Platform.currentTime))
       context.system.eventStream.publish(PaymentReceived(paidAmount, paymentHash))
   }

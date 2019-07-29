@@ -37,8 +37,8 @@ import scala.collection.JavaConversions._
 import scala.concurrent.duration.FiniteDuration
 
 /**
-  * Created by PM on 26/02/2017.
-  */
+ * Created by PM on 26/02/2017.
+ */
 case class NodeParams(keyManager: KeyManager,
                       alias: String,
                       color: Color,
@@ -93,12 +93,12 @@ object NodeParams {
   object ELECTRUM extends WatcherType
 
   /**
-    * Order of precedence for the configuration parameters:
-    * 1) Java environment variables (-D...)
-    * 2) Configuration file eclair.conf
-    * 3) Optionally provided config
-    * 4) Default values in reference.conf
-    */
+   * Order of precedence for the configuration parameters:
+   * 1) Java environment variables (-D...)
+   * 2) Configuration file eclair.conf
+   * 3) Optionally provided config
+   * 4) Default values in reference.conf
+   */
   def loadConfiguration(datadir: File, overrideDefaults: Config = ConfigFactory.empty()) =
     ConfigFactory.parseProperties(System.getProperties)
       .withFallback(ConfigFactory.parseFile(new File(datadir, "eclair.conf")))
@@ -228,6 +228,8 @@ object NodeParams {
         searchMaxCltv = config.getInt("router.path-finding.max-cltv"),
         searchMaxFeeBaseSat = config.getLong("router.path-finding.fee-threshold-sat"),
         searchMaxFeePct = config.getDouble("router.path-finding.max-fee-pct"),
+        multiPartMinShareMsat = 1000 * config.getLong("router.path-finding.multi-part-min-share-sat"),
+        multiPartThresholdMsat = 1000 * config.getLong("router.path-finding.multi-part-threshold-sat"),
         searchHeuristicsEnabled = config.getBoolean("router.path-finding.heuristics-enable"),
         searchRatioCltv = config.getDouble("router.path-finding.ratio-cltv"),
         searchRatioChannelAge = config.getDouble("router.path-finding.ratio-channel-age"),

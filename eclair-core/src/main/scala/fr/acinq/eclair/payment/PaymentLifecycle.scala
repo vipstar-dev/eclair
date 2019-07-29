@@ -19,6 +19,7 @@ package fr.acinq.eclair.payment
 import java.util.UUID
 
 import akka.actor.{ActorRef, FSM, Props, Status}
+import akka.event.Logging.MDC
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{ByteVector32, MilliSatoshi}
 import fr.acinq.eclair._
@@ -37,9 +38,9 @@ import scala.compat.Platform
 import scala.util.{Failure, Success}
 
 /**
-  * Created by PM on 26/08/2016.
-  */
-class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, register: ActorRef) extends FSM[PaymentLifecycle.State, PaymentLifecycle.Data] {
+ * Created by PM on 26/08/2016.
+ */
+class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, register: ActorRef) extends FSMDiagnosticActorLogging[PaymentLifecycle.State, PaymentLifecycle.Data] {
 
   val paymentsDb = nodeParams.db.payments
 
@@ -47,19 +48,26 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
 
   when(WAITING_FOR_REQUEST) {
     case Event(c: SendPaymentToRoute, WaitingForRequest) =>
+      log.debug(s"sending ${c.finalAmountMsat}msat to route ${c.hops.mkString("->")}")
       val send = SendPayment(c.paymentHash, c.hops.last, maxAttempts = 1, c.paymentOptions)
       paymentsDb.addOutgoingPayment(OutgoingPayment(id, c.paymentHash, None, c.paymentOptions.finalAmountMsat, Platform.currentTime, None, OutgoingPaymentStatus.PENDING))
       router ! FinalizeRoute(c.hops)
       goto(WAITING_FOR_ROUTE) using WaitingForRoute(sender, send, failures = Nil)
 
     case Event(c: SendPayment, WaitingForRequest) =>
-      router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, routeParams = c.routeParams)
+      log.debug(s"sending ${c.finalAmountMsat}msat to ${c.targetNodeId}")
+      if (c.routePrefix.lastOption.exists(_.nextNodeId == c.targetNodeId)) {
+        // If the sender already provided a route to the target, no need to involve the router.
+        self ! RouteResponse(Nil, Set.empty, Set.empty, allowEmpty = true)
+      } else {
+        router ! RouteRequest(c.getRouteStart(nodeParams), c.targetNodeId, c.paymentOptions.finalAmountMsat, c.assistedRoutes, routeParams = c.routeParams)
+      }
       paymentsDb.addOutgoingPayment(OutgoingPayment(id, c.paymentHash, None, c.paymentOptions.finalAmountMsat, Platform.currentTime, None, OutgoingPaymentStatus.PENDING))
       goto(WAITING_FOR_ROUTE) using WaitingForRoute(sender, c, failures = Nil)
   }
 
   when(WAITING_FOR_ROUTE) {
-    case Event(RouteResponse(routeHops, ignoreNodes, ignoreChannels), WaitingForRoute(s, c, failures)) =>
+    case Event(RouteResponse(routeHops, ignoreNodes, ignoreChannels, _), WaitingForRoute(s, c, failures)) =>
       val hops = c.routePrefix ++ routeHops
       log.info(s"route found: attempt=${failures.size + 1}/${c.maxAttempts} route=${hops.map(_.nextNodeId).mkString("->")} channels=${hops.map(_.lastUpdate.shortChannelId).mkString("->")}")
       val firstHop = hops.head
@@ -188,6 +196,10 @@ class PaymentLifecycle(nodeParams: NodeParams, id: UUID, router: ActorRef, regis
     context.system.eventStream.publish(e)
   }
 
+  override def mdc(currentMessage: Any): MDC = {
+    Logs.mdc(paymentId_opt = Some(id))
+  }
+
   initialize()
 }
 
@@ -206,7 +218,9 @@ object PaymentLifecycle {
 
   case class DecryptedHtlc(htlc: UpdateAddHtlc, onionPayload: OnionPerHopPayload)
 
-  case class SendPaymentToRoute(paymentHash: ByteVector32, hops: Seq[PublicKey], paymentOptions: PaymentOptions)
+  case class SendPaymentToRoute(paymentHash: ByteVector32, hops: Seq[PublicKey], paymentOptions: PaymentOptions) {
+    val finalAmountMsat: Long = paymentOptions.finalAmountMsat
+  }
   case class SendPayment(paymentHash: ByteVector32,
                          targetNodeId: PublicKey,
                          maxAttempts: Int,
@@ -215,6 +229,8 @@ object PaymentLifecycle {
                          routeParams: Option[RouteParams] = None,
                          routePrefix: Seq[Hop] = Nil) {
     require(paymentOptions.finalAmountMsat > 0, s"amountMsat must be > 0")
+
+    val finalAmountMsat: Long = paymentOptions.finalAmountMsat
 
     def getRouteStart(nodeParams: NodeParams): PublicKey = routePrefix match {
       case Nil => nodeParams.nodeId
@@ -273,15 +289,15 @@ object PaymentLifecycle {
   }
 
   /**
-    * Build the onion payloads for each hop.
-    *
-    * @param hops            the hops as computed by the router + extra routes from payment request
-    * @param opts            options to help build each hop's payload (final amount, expiry, additional tlv records, etc)
-    * @return a (firstAmountMsat, firstExpiry, payloads) tuple where:
-    *         - firstAmountMsat is the amount for the first htlc in the route
-    *         - firstExpiry is the cltv expiry for the first htlc in the route
-    *         - a sequence of payloads that will be used to build the onion
-    */
+   * Build the onion payloads for each hop.
+   *
+   * @param hops the hops as computed by the router + extra routes from payment request
+   * @param opts options to help build each hop's payload (final amount, expiry, additional tlv records, etc)
+   * @return a (firstAmountMsat, firstExpiry, payloads) tuple where:
+   *         - firstAmountMsat is the amount for the first htlc in the route
+   *         - firstExpiry is the cltv expiry for the first htlc in the route
+   *         - a sequence of payloads that will be used to build the onion
+   */
   def buildPayloads(hops: Seq[Hop], opts: PaymentOptions): (Long, Long, Seq[OnionPerHopPayload]) = {
     val finalPayload: Seq[OnionPerHopPayload] = opts match {
       case p: LegacyPayload => OnionForwardInfo(ShortChannelId(0L), p.finalAmountMsat, p.finalExpiry) :: Nil
@@ -305,16 +321,16 @@ object PaymentLifecycle {
   }
 
   /**
-    * Rewrites a list of failures to retrieve the meaningful part.
-    * <p>
-    * If a list of failures with many elements ends up with a LocalFailure RouteNotFound, this RouteNotFound failure
-    * should be removed. This last failure is irrelevant information. In such a case only the n-1 attempts were rejected
-    * with a **significant reason** ; the final RouteNotFound error provides no meaningful insight.
-    * <p>
-    * This method should be used by the user interface to provide a non-exhaustive but more useful feedback.
-    *
-    * @param failures a list of payment failures for a payment
-    */
+   * Rewrites a list of failures to retrieve the meaningful part.
+   * <p>
+   * If a list of failures with many elements ends up with a LocalFailure RouteNotFound, this RouteNotFound failure
+   * should be removed. This last failure is irrelevant information. In such a case only the n-1 attempts were rejected
+   * with a **significant reason** ; the final RouteNotFound error provides no meaningful insight.
+   * <p>
+   * This method should be used by the user interface to provide a non-exhaustive but more useful feedback.
+   *
+   * @param failures a list of payment failures for a payment
+   */
   def transformForUser(failures: Seq[PaymentFailure]): Seq[PaymentFailure] = {
     failures.map {
       case LocalFailure(AddHtlcFailed(_, _, t, _, _, _)) => LocalFailure(t) // we're interested in the error which caused the add-htlc to fail
@@ -326,17 +342,17 @@ object PaymentLifecycle {
   }
 
   /**
-    * This method retrieves the channel update that we used when we built a route.
-    * It just iterates over the hops, but there are at most 20 of them.
-    *
-    * @return the channel update if found
-    */
+   * This method retrieves the channel update that we used when we built a route.
+   * It just iterates over the hops, but there are at most 20 of them.
+   *
+   * @return the channel update if found
+   */
   def getChannelUpdateForNode(nodeId: PublicKey, hops: Seq[Hop]): Option[ChannelUpdate] = hops.find(_.nodeId == nodeId).map(_.lastUpdate)
 
   /**
-    * This allows us to detect if a bad node always answers with a new update (e.g. with a slightly different expiry or fee)
-    * in order to mess with us.
-    */
+   * This allows us to detect if a bad node always answers with a new update (e.g. with a slightly different expiry or fee)
+   * in order to mess with us.
+   */
   def hasAlreadyFailedOnce(nodeId: PublicKey, failures: Seq[PaymentFailure]): Boolean =
     failures
       .collectFirst { case RemoteFailure(_, Sphinx.DecryptedFailurePacket(origin, u: Update)) if origin == nodeId => u.update }

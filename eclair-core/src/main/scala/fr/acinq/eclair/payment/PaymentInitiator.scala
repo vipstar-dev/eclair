@@ -22,10 +22,10 @@ import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.channel.{AvailableBalanceChanged, Channel, LocalChannelDown, LocalChannelUpdate}
-import fr.acinq.eclair.payment.PaymentLifecycle.{LegacyPayload, SendPayment, SendPaymentToRoute}
+import fr.acinq.eclair.payment.PaymentLifecycle.{LegacyPayload, SendPayment, SendPaymentToRoute, TlvPayload}
 import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
 import fr.acinq.eclair.router.RouteParams
-import fr.acinq.eclair.wire.ChannelUpdate
+import fr.acinq.eclair.wire.{ChannelUpdate, OnionTlv}
 import fr.acinq.eclair.{NodeParams, ShortChannelId}
 
 /**
@@ -43,15 +43,23 @@ class PaymentInitiator(nodeParams: NodeParams, router: ActorRef, register: Actor
 
   override def receive: Receive = {
 
-    // TODO: create an actor that sits in front of PaymentLifecycle and uses it for each sub-payment
-    case p: SendPaymentRequest if p.allowMultiPart => ???
-
     case p: SendPaymentRequest =>
       val paymentId = UUID.randomUUID()
-      val payFsm = context.actorOf(PaymentLifecycle.props(nodeParams, paymentId, router, register))
       p.predefinedRoute match {
-        case Nil => payFsm forward SendPayment(p.paymentHash, p.targetNodeId, p.maxAttempts, LegacyPayload(p.amountMsat, p.finalCltvExpiry), p.assistedRoutes, p.routeParams)
-        case hops => payFsm forward SendPaymentToRoute(p.paymentHash, hops, LegacyPayload(p.amountMsat, p.finalCltvExpiry))
+        case Nil =>
+          if (p.allowMultiPart) {
+            val payFsm = spawnMultiPartPaymentFsm(paymentId)
+            payFsm forward SendPayment(p.paymentHash, p.targetNodeId, p.maxAttempts, TlvPayload(p.amountMsat, p.finalCltvExpiry, Seq(OnionTlv.MultiPartPayment(p.multiPartTotalAmountMsat.getOrElse(p.amountMsat)))), p.assistedRoutes, p.routeParams)
+          } else {
+            val payFsm = spawnPaymentFsm(paymentId)
+            payFsm forward SendPayment(p.paymentHash, p.targetNodeId, p.maxAttempts, LegacyPayload(p.amountMsat, p.finalCltvExpiry), p.assistedRoutes, p.routeParams)
+          }
+        case hops =>
+          val payFsm = spawnPaymentFsm(paymentId)
+          p.multiPartTotalAmountMsat match {
+            case Some(totalAmountMsat) => payFsm forward SendPaymentToRoute(p.paymentHash, hops, TlvPayload(p.amountMsat, p.finalCltvExpiry, Seq(OnionTlv.MultiPartPayment(totalAmountMsat))))
+            case None => payFsm forward SendPaymentToRoute(p.paymentHash, hops, LegacyPayload(p.amountMsat, p.finalCltvExpiry))
+          }
       }
       sender ! paymentId
 
@@ -71,6 +79,10 @@ class PaymentInitiator(nodeParams: NodeParams, router: ActorRef, register: Actor
 
   }
 
+  def spawnPaymentFsm(paymentId: UUID): ActorRef = context.actorOf(PaymentLifecycle.props(nodeParams, paymentId, router, register))
+
+  def spawnMultiPartPaymentFsm(paymentId: UUID): ActorRef = context.actorOf(MultiPartPaymentLifecycle.props(nodeParams, paymentId, localChannels, router, register))
+
 }
 
 object PaymentInitiator {
@@ -86,7 +98,7 @@ object PaymentInitiator {
                                 finalCltvExpiry: Long = Channel.MIN_CLTV_EXPIRY,
                                 routeParams: Option[RouteParams] = None,
                                 allowMultiPart: Boolean = false,
-                                multiPartTotalAmountMsat: Option[Long] = None) // TODO: set properly
+                                multiPartTotalAmountMsat: Option[Long] = None)
 
   case class LocalChannel(remoteNodeId: PublicKey, localBalanceMsat: Long, lastUpdate: ChannelUpdate)
 
