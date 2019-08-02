@@ -37,7 +37,7 @@ import fr.acinq.eclair.wire.{ChannelAnnouncement, ChannelUpdate, NodeAddress, No
 import scodec.bits.ByteVector
 
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 case class GetInfoResponse(nodeId: PublicKey, alias: String, chainHash: ByteVector32, blockHeight: Int, publicAddresses: Seq[NodeAddress])
 
@@ -53,7 +53,6 @@ object TimestampQueryFilters {
     TimestampQueryFilters(from, to)
   }
 }
-
 
 trait Eclair {
 
@@ -112,7 +111,7 @@ trait Eclair {
 
 class EclairImpl(appKit: Kit) extends Eclair {
 
-  implicit val ec: ExecutionContextExecutor = appKit.system.dispatcher
+  implicit val ec: ExecutionContext = appKit.system.dispatcher
 
   override def connect(target: Either[NodeURI, PublicKey])(implicit timeout: Timeout): Future[String] = target match {
     case Left(uri) => (appKit.switchboard ? Peer.Connect(uri)).mapTo[String]

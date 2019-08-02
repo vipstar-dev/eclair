@@ -223,13 +223,13 @@ object PaymentLifecycle {
     // The final htlc expiry in number of blocks.
     val finalExpiry: Long
   }
-  case class LegacyPayload(finalAmountMsat: Long, finalCltvExpiry: Long) extends PaymentOptions {
+  case class LegacyPayload(finalAmountMsat: Long, finalCltvExpiryDelta: Long) extends PaymentOptions {
     // We add one block in order to not have our htlc fail when a new block has just been found.
-    override val finalExpiry = Globals.blockCount.get() + finalCltvExpiry + 1
+    override val finalExpiry = Globals.blockCount.get() + finalCltvExpiryDelta + 1
   }
-  case class TlvPayload(finalAmountMsat: Long, finalCltvExpiry: Long, records: Seq[OnionTlv] = Nil) extends PaymentOptions {
+  case class TlvPayload(finalAmountMsat: Long, finalCltvExpiryDelta: Long, records: Seq[OnionTlv] = Nil) extends PaymentOptions {
     // We add one block in order to not have our htlc fail when a new block has just been found.
-    override val finalExpiry = Globals.blockCount.get() + finalCltvExpiry + 1
+    override val finalExpiry = Globals.blockCount.get() + finalCltvExpiryDelta + 1
   }
 
   sealed trait Data
