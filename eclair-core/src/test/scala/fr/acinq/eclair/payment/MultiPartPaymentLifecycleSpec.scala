@@ -20,23 +20,23 @@ import java.util.UUID
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit.{TestFSMRef, TestKit, TestProbe}
-import fr.acinq.bitcoin.Crypto.PrivateKey
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.{Block, Crypto}
 import fr.acinq.eclair._
-import fr.acinq.eclair.channel.{AvailableBalanceChanged, LocalChannelDown, LocalChannelUpdate}
+import fr.acinq.eclair.channel.{AvailableBalanceChanged, Channel, LocalChannelDown, LocalChannelUpdate}
 import fr.acinq.eclair.db.OutgoingPaymentStatus
 import fr.acinq.eclair.payment.PaymentInitiator.LocalChannel
-import fr.acinq.eclair.payment.PaymentLifecycle.{SendPayment, TlvPayload}
-import fr.acinq.eclair.router.Hop
-import fr.acinq.eclair.wire.ChannelUpdate
+import fr.acinq.eclair.payment.PaymentLifecycle.{LegacyPayload, SendPayment, TlvPayload}
+import fr.acinq.eclair.router.{Hop, RouteParams, RouterConf}
+import fr.acinq.eclair.wire.{ChannelUpdate, OnionTlv}
 import fr.acinq.eclair.wire.OnionTlv.MultiPartPayment
 import org.scalatest.{Outcome, fixture}
 
 import scala.concurrent.duration._
 
 /**
- * Created by t-bast on 18/07/2019.
- */
+  * Created by t-bast on 18/07/2019.
+  */
 
 class MultiPartPaymentLifecycleSpec extends TestKit(ActorSystem("test")) with fixture.FunSuiteLike {
 
@@ -319,6 +319,31 @@ class MultiPartPaymentLifecycleSpec extends TestKit(ActorSystem("test")) with fi
     assert(paymentHandler.underlyingActor.localChannels(channelId_ac_1) === LocalChannel(c, 40000, channelUpdate_ac_1_2))
   }
 
+  test("reproduce splitting error") { f =>
+    val routerConf = RouterConf(false,10 seconds,60 seconds,21,0.03,4,1008,true,0.15,0.35,0.5,10000000,100000000)
+    val nodeParams = TestConstants.Alice.nodeParams.copy(routerConf = routerConf)
+    val amountMsat = 120000000L
+    val paymentRequest = PaymentRequest.read("lntb1200u1pw4z2rspp5rz9cpsxzthvmtj6x4hpgr8fxqeg4xpkdt8evp6sessteghlfgv8qdqc2p5x7etwd9uzqurp09kk2mn5xqrrss9qpzrzjqwfn3p9278ttzzpe0e00uhyxhned3j5d9acqak5emwfpflp8z2cnfl7ld20evzvkrcqqqqlgqqqqqeqqjqaedhetcae5shgc90q65yxl4pjqsvvs9p6h7t0wmjkpvndstv60jq9wjm4l047e2uwsnsekdrn3wk5dgzgn7c7ps57h7xpmnjcdrq0dspeka896")
+    val p = PaymentInitiator.SendPaymentRequest(
+      /* amount */ amountMsat,
+      /* paymentHash */ paymentRequest.paymentHash,
+      /* target */ paymentRequest.nodeId,
+      /* max attempts */ 10,
+      /* predefined route */ Nil,
+      ///* payment request */ Some(paymentRequest),
+      /* assisted routes */ Nil,
+      /* cltv expiry */ Channel.MIN_CLTV_EXPIRY,
+      /* route params */ Some(RouteParams(false,100000000,1.0,4,1008,None)),
+      /* allow amp */ true,
+      /* amp total amount */ Some(amountMsat))
+    val spr = SendPayment(p.paymentHash, p.targetNodeId, p.maxAttempts, TlvPayload(p.amountMsat, p.finalCltvExpiry, Seq(OnionTlv.MultiPartPayment(p.multiPartTotalAmountMsat.getOrElse(p.amountMsat)))), p.assistedRoutes, p.routeParams)
+    //val SendPayment(188b80c0c25dd9b5cb46adc2819d2606515306cd59f2c0ea198417945fe9430e,03504daf50a1198c86d58e3ba40d335a36a529785b79e7ff8c20df6a9f9609961e,10,TlvPayload(120000000,9,List(MultiPartPayment(120000000))),Some(PaymentRequest(lntb,Some(MilliSatoshi(120000000)),1565599856,03504daf50a1198c86d58e3ba40d335a36a529785b79e7ff8c20df6a9f9609961e,List(PaymentHash(188b80c0c25dd9b5cb46adc2819d2606515306cd59f2c0ea198417945fe9430e), Description(Phoenix payment), Expiry(BitVector(15 bits, 0x1c20)), Features(BitVector(5 bits, 0x10)), RoutingInfo(List(ExtraHop(03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134,16768874x10458633x38430,1000,100,144)))),ByteVector(65 bytes, 0xee5b7caf1dcd217460af06a8437ea19020c640a1d5fcb7bb72b05936c16cd3e402ba5bafdf5f655c74270cd9a39c5d6a350244fd8f0614f5fc60ee72c34607b601))),List(),Some(RouteParams(false,100000000,1.0,4,1008,None)),List())
+    import scodec.bits._
+    val localChannels = Map(ShortChannelId("1569526x68x1") -> LocalChannel(
+      PublicKey(hex"03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134"), 267004200, null))
+    MultiPartPaymentLifecycle.splitPayment(nodeParams, amountMsat, localChannels, spr)
+  }
+
 }
 
 object MultiPartPaymentLifecycleSpec {
@@ -327,14 +352,14 @@ object MultiPartPaymentLifecycleSpec {
   val paymentHash = Crypto.sha256(paymentPreimage)
 
   /**
-   * We simulate a multi-part-friendly network:
-   * .-----> b -------.
-   * |                |
-   * a ----> c -----> e
-   * |                |
-   * '-----> d -------'
-   * where a has multiple channels with each of his peers.
-   */
+    * We simulate a multi-part-friendly network:
+    * .-----> b -------.
+    * |                |
+    * a ----> c -----> e
+    * |                |
+    * '-----> d -------'
+    * where a has multiple channels with each of his peers.
+    */
 
   val a :: b :: c :: d :: e :: Nil = Seq.fill(5)(PrivateKey(randomBytes32).publicKey)
   val channelId_ab_1 = ShortChannelId(1)
