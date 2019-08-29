@@ -23,7 +23,7 @@ import fr.acinq.bitcoin.{Block, ByteVector32, ByteVector64}
 import fr.acinq.eclair._
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.wire.LightningMessageCodecs._
-import ReplyChannelRangeTlv._
+import fr.acinq.eclair.wire.ReplyChannelRangeTlv._
 import org.scalatest.FunSuite
 import scodec.bits.{ByteVector, HexStringSyntax}
 
@@ -123,10 +123,6 @@ class LightningMessageCodecsSpec extends FunSuite {
   case class TestItem(msg: Any, hex: String)
 
   test("test vectors for extended channel queries ") {
-    import org.json4s.{CustomSerializer, ShortTypeHints}
-    import org.json4s.JsonAST.JString
-    import org.json4s.jackson.Serialization
-    import fr.acinq.eclair.api._
 
     val query_channel_range = QueryChannelRange(Block.RegtestGenesisBlock.blockId, 100000, 1500, TlvStream.empty)
     val query_channel_range_timestamps_checksums = QueryChannelRange(Block.RegtestGenesisBlock.blockId,
