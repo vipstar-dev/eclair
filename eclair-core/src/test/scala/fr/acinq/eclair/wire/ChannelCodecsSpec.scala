@@ -16,20 +16,17 @@
 
 package fr.acinq.eclair.wire
 
-import java.net.InetSocketAddress
 import java.util.UUID
 
 import akka.actor.ActorSystem
-import com.google.common.net.HostAndPort
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.DeterministicWallet.KeyPath
 import fr.acinq.bitcoin.{Block, ByteVector32, ByteVector64, Crypto, DeterministicWallet, OutPoint, Satoshi, Transaction}
 import fr.acinq.eclair.channel.Helpers.Funding
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.crypto.{LocalKeyManager, ShaChain}
-import fr.acinq.eclair.db.OutgoingPaymentStatus
-import fr.acinq.eclair.payment.{Local, PaymentRequest, Relayed}
-import fr.acinq.eclair.router.{Announcements, RouteResponse}
+import fr.acinq.eclair.payment.{Local, Relayed}
+import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.transactions.Transactions.{CommitTx, InputInfo, TransactionWithInputInfo}
 import fr.acinq.eclair.transactions._
 import fr.acinq.eclair.wire.ChannelCodecs._
@@ -509,12 +506,6 @@ object ChannelCodecsSpec {
       ))
     }))
 
-    class InetSocketAddressSerializer extends CustomSerializer[InetSocketAddress](format => ( {
-      null
-    }, {
-      case address: InetSocketAddress => JString(HostAndPort.fromParts(address.getHostString, address.getPort).toString)
-    }))
-
     class OutPointSerializer extends CustomSerializer[OutPoint](format => ( {
       null
     }, {
@@ -533,85 +524,6 @@ object ChannelCodecsSpec {
       case x: InputInfo => JObject(("outPoint", JString(s"${x.outPoint.txid}:${x.outPoint.index}")), ("amountSatoshis", JInt(x.txOut.amount.toLong)))
     }))
 
-    class ColorSerializer extends CustomSerializer[Color](format => ( {
-      null
-    }, {
-      case c: Color => JString(c.toString)
-    }))
-
-    class RouteResponseSerializer extends CustomSerializer[RouteResponse](format => ( {
-      null
-    }, {
-      case route: RouteResponse =>
-        val nodeIds = route.hops match {
-          case rest :+ last => rest.map(_.nodeId) :+ last.nodeId :+ last.nextNodeId
-          case Nil => Nil
-        }
-        JArray(nodeIds.toList.map(n => JString(n.toString)))
-    }))
-
-    class ThrowableSerializer extends CustomSerializer[Throwable](format => ( {
-      null
-    }, {
-      case t: Throwable if t.getMessage != null => JString(t.getMessage)
-      case t: Throwable => JString(t.getClass.getSimpleName)
-    }))
-
-    class FailureMessageSerializer extends CustomSerializer[FailureMessage](format => ( {
-      null
-    }, {
-      case m: FailureMessage => JString(m.message)
-    }))
-
-    class NodeAddressSerializer extends CustomSerializer[NodeAddress](format => ( {
-      null
-    }, {
-      case n: NodeAddress => JString(HostAndPort.fromParts(n.socketAddress.getHostString, n.socketAddress.getPort).toString)
-    }))
-
-    class DirectionSerializer extends CustomSerializer[Direction](format => ( {
-      null
-    }, {
-      case d: Direction => JString(d.toString)
-    }))
-
-    class PaymentRequestSerializer extends CustomSerializer[PaymentRequest](format => ( {
-      null
-    }, {
-      case p: PaymentRequest => {
-        val expiry = p.expiry.map(ex => JField("expiry", JLong(ex))).toSeq
-        val minFinalCltvExpiry = p.minFinalCltvExpiryDelta.map(mfce => JField("minFinalCltvExpiry", JInt(mfce.toInt))).toSeq
-        val amount = p.amount.map(msat => JField("amount", JLong(msat.toLong))).toSeq
-
-        val fieldList = List(JField("prefix", JString(p.prefix)),
-          JField("timestamp", JLong(p.timestamp)),
-          JField("nodeId", JString(p.nodeId.toString())),
-          JField("serialized", JString(PaymentRequest.write(p))),
-          JField("description", JString(p.description match {
-            case Left(l) => l.toString()
-            case Right(r) => r.toString()
-          })),
-          JField("paymentHash", JString(p.paymentHash.toString()))) ++
-          expiry ++
-          minFinalCltvExpiry ++
-          amount
-
-        JObject(fieldList)
-      }
-    }))
-
-    class JavaUUIDSerializer extends CustomSerializer[UUID](format => ( {
-      null
-    }, {
-      case id: UUID => JString(id.toString)
-    }))
-
-    class OutgoingPaymentStatusSerializer extends CustomSerializer[OutgoingPaymentStatus.Value](format => ( {
-      null
-    }, {
-      case el: OutgoingPaymentStatus.Value => JString(el.toString)
-    }))
-
     implicit val formats = org.json4s.DefaultFormats +
       new ByteVectorSerializer +
       new ByteVector32Serializer +
@@ -628,19 +540,9 @@ object ChannelCodecsSpec {
       new PrivateKeySerializer +
       new TransactionSerializer +
       new TransactionWithInputInfoSerializer +
-      new InetSocketAddressSerializer +
       new OutPointSerializer +
       new OutPointKeySerializer +
       new ChannelVersionSerializer +
-      new InputInfoSerializer +
-      new ColorSerializer +
-      new RouteResponseSerializer +
-      new ThrowableSerializer +
-      new FailureMessageSerializer +
-      new NodeAddressSerializer +
-      new DirectionSerializer +
-      new PaymentRequestSerializer +
-      new JavaUUIDSerializer +
-      new OutgoingPaymentStatusSerializer
+      new InputInfoSerializer
   }
 }
