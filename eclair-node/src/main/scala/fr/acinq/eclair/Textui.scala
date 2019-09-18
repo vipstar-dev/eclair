@@ -25,11 +25,12 @@ import com.googlecode.lanterna.gui2.dialogs.TextInputDialogBuilder
 import com.googlecode.lanterna.input.KeyStroke
 import com.googlecode.lanterna.{TerminalPosition, TerminalSize}
 import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{MilliSatoshi, Satoshi}
+import fr.acinq.bitcoin.Satoshi
 import fr.acinq.eclair.channel.State
 import fr.acinq.eclair.io.{NodeURI, Peer}
 import fr.acinq.eclair.payment.PaymentLifecycle.SendPayment
 import fr.acinq.eclair.payment.PaymentRequest
+import fr.acinq.eclair.wire.Onion
 import grizzled.slf4j.Logging
 import scodec.bits.ByteVector
 
@@ -76,7 +77,7 @@ class Textui(kit: Kit) extends Logging {
     channelPanel.addComponent(channelDataPanel)
     val pb = new ProgressBar(0, 100)
     pb.setLabelFormat(s"$balance")
-    pb.setValue((balance.amount * 100 / capacity.amount).toInt)
+    pb.setValue((balance * 100 / capacity.toLong).toLong.toInt)
     pb.setPreferredWidth(100)
     channelPanel.addComponent(pb)
     channelsPanel.addComponent(channelPanel)
@@ -147,7 +148,7 @@ class Textui(kit: Kit) extends Logging {
               .showDialog(gui)
             try {
               val paymentRequest = PaymentRequest.read(input)
-              kit.paymentInitiator ! SendPayment(paymentRequest.amount.getOrElse(MilliSatoshi(1000000)).amount, paymentRequest.paymentHash, paymentRequest.nodeId, maxAttempts = 3)
+              kit.paymentInitiator ! SendPayment(paymentRequest.paymentHash, paymentRequest.nodeId, Onion.FinalLegacyPayload(paymentRequest.amount.getOrElse(MilliSatoshi(10000)), CltvExpiry(paymentRequest.expiry.getOrElse(155))), maxAttempts = 3)
             } catch {
               case t: Throwable => logger.error("", t)
             }
