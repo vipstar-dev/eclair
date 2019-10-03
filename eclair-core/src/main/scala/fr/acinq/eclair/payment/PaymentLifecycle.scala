@@ -230,6 +230,14 @@ object PaymentLifecycle {
     }
   }
 
+  case class RelayedPaymentProgressHandler(id: UUID) extends PaymentProgressHandler {
+    override def onSend(amount: MilliSatoshi): Unit = {}
+
+    override def onSuccess(sender: ActorRef, result: PaymentSent)(ctx: ActorContext): Unit = sender ! result
+
+    override def onFailure(sender: ActorRef, result: PaymentFailed)(ctx: ActorContext): Unit = sender ! result
+  }
+
   /**
    * Use this message to create a Bolt 11 invoice to receive a payment.
    *
@@ -298,19 +306,20 @@ object PaymentLifecycle {
   case object WAITING_FOR_PAYMENT_COMPLETE extends State
   // @formatter:on
 
-  def buildOnion(nodes: Seq[PublicKey], payloads: Seq[PerHopPayload], associatedData: ByteVector32): Sphinx.PacketAndSecrets = {
+  def buildOnion(packetType: Sphinx.OnionRoutingPacket)(nodes: Seq[PublicKey], payloads: Seq[PerHopPayload], associatedData: ByteVector32): Sphinx.PacketAndSecrets = {
     require(nodes.size == payloads.size)
     val sessionKey = randomKey
     val payloadsBin: Seq[ByteVector] = payloads
       .map {
         case p: FinalPayload => OnionCodecs.finalPerHopPayloadCodec.encode(p)
         case p: RelayPayload => OnionCodecs.relayPerHopPayloadCodec.encode(p)
+        case p: RelayTrampolinePayload => OnionCodecs.tlvPerHopPayloadCodec.encode(p.records)
       }
       .map {
         case Attempt.Successful(bitVector) => bitVector.toByteVector
         case Attempt.Failure(cause) => throw new RuntimeException(s"serialization error: $cause")
       }
-    Sphinx.PaymentPacket.create(sessionKey, nodes, payloadsBin, associatedData)
+    packetType.create(sessionKey, nodes, payloadsBin, associatedData)
   }
 
   /**
@@ -323,13 +332,16 @@ object PaymentLifecycle {
    *         - firstExpiry is the cltv expiry for the first htlc in the route
    *         - a sequence of payloads that will be used to build the onion
    */
-  def buildPayloads(hops: Seq[Hop], finalPayload: FinalPayload): (MilliSatoshi, CltvExpiry, Seq[PerHopPayload]) = {
+  def buildPayloads(hops: Seq[GenericHop], finalPayload: FinalPayload): (MilliSatoshi, CltvExpiry, Seq[PerHopPayload]) = {
+    import fr.acinq.eclair.wire.OnionTlv._
     hops.reverse.foldLeft((finalPayload.amount, finalPayload.expiry, Seq[PerHopPayload](finalPayload))) {
       case ((amount, expiry, payloads), hop) =>
-        val nextFee = nodeFee(hop.lastUpdate.feeBaseMsat, hop.lastUpdate.feeProportionalMillionths, amount)
-        // Since we don't have any scenario where we add tlv data for intermediate hops, we use legacy payloads.
-        val payload = RelayLegacyPayload(hop.lastUpdate.shortChannelId, amount, expiry)
-        (amount + nextFee, expiry + hop.lastUpdate.cltvExpiryDelta, payload +: payloads)
+        val payload = hop match {
+          // Since we don't have any scenario where we add tlv data for intermediate hops, we use legacy payloads.
+          case hop: Hop => RelayLegacyPayload(hop.lastUpdate.shortChannelId, amount, expiry)
+          case hop: TrampolineHop => RelayTrampolinePayload(TlvStream[OnionTlv](AmountToForward(amount), OutgoingCltv(expiry), OutgoingNodeId(hop.nextNodeId)))
+        }
+        (amount + hop.fee(amount), expiry + hop.cltvExpiryDelta, payload +: payloads)
     }
   }
 
@@ -337,7 +349,7 @@ object PaymentLifecycle {
     val (firstAmount, firstExpiry, payloads) = buildPayloads(hops.drop(1), finalPayload)
     val nodes = hops.map(_.nextNodeId)
     // BOLT 2 requires that associatedData == paymentHash
-    val onion = buildOnion(nodes, payloads, paymentHash)
+    val onion = buildOnion(Sphinx.PaymentPacket)(nodes, payloads, paymentHash)
     CMD_ADD_HTLC(firstAmount, paymentHash, firstExpiry, onion.packet, upstream = Left(id), commit = true) -> onion.sharedSecrets
   }
 
