@@ -423,18 +423,18 @@ object ElectrumClient {
   }
 
   case class Header(block_height: Long, version: Long, prev_block_hash: ByteVector32, merkle_root: ByteVector32, timestamp: Long, bits: Long, nonce: Long) {
-    def blockHeader = BlockHeader(version, prev_block_hash.reverse, merkle_root.reverse, timestamp, bits, nonce)
+    def blockHeader = BlockHeaderElectrum(version, prev_block_hash.reverse, merkle_root.reverse, timestamp, bits, nonce)
 
     lazy val block_hash: ByteVector32 = blockHeader.hash
     lazy val block_id: ByteVector32 = block_hash.reverse
   }
 
   object Header {
-    def makeHeader(height: Long, header: BlockHeader) = ElectrumClient.Header(height, header.version, header.hashPreviousBlock.reverse, header.hashMerkleRoot.reverse, header.time, header.bits, header.nonce)
+    def makeHeader(height: Long, header: BlockHeaderElectrum) = ElectrumClient.Header(height, header.version, header.hashPreviousBlock.reverse, header.hashMerkleRoot.reverse, header.time, header.bits, header.nonce)
 
-    val RegtestGenesisHeader = makeHeader(0, Block.RegtestGenesisBlock.header)
-    val TestnetGenesisHeader = makeHeader(0, Block.TestnetGenesisBlock.header)
-    val LivenetGenesisHeader = makeHeader(0, Block.LivenetGenesisBlock.header)
+    val RegtestGenesisHeader = makeHeader(0, BlockElectrum.RegtestGenesisBlock.header)
+    val TestnetGenesisHeader = makeHeader(0, BlockElectrum.TestnetGenesisBlock.header)
+    val LivenetGenesisHeader = makeHeader(0, BlockElectrum.LivenetGenesisBlock.header)
   }
 
   case class TransactionHistory(history: Seq[TransactionHistoryItem]) extends Response
