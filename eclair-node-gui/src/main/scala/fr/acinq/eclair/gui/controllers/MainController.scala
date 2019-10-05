@@ -360,7 +360,7 @@ class MainController(val handlers: Handlers, val hostServices: HostServices) ext
     labelServer.setText(s"${setup.config.getInt("server.port")}")
 
     val wallet = setup.nodeParams.watcherType match {
-      case BITCOIND => "Bitcoin-core"
+      case BITCOIND => "VIPSTARCOIN-core"
       case ELECTRUM => "Electrum"
     }
     bitcoinWallet.setText(wallet)

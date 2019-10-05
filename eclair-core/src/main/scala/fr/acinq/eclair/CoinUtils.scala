@@ -78,17 +78,17 @@ case object BitUnit extends CoinUnit {
 }
 
 case object MBtcUnit extends CoinUnit {
-  override def code: String = "mbtc"
-  override def shortLabel: String = "mBTC"
-  override def label: String = "MilliBitcoin"
-  override def factorToMsat: Long = 1000 * 100000L // 1 mbtc = 1 00000 000 msat
+  override def code: String = "mvips"
+  override def shortLabel: String = "mVIPS"
+  override def label: String = "MilliVIPSTARCOIN"
+  override def factorToMsat: Long = 1000 * 100000L // 1 mvips = 1 00000 000 msat
 }
 
 case object BtcUnit extends CoinUnit {
-  override def code: String = "btc"
-  override def shortLabel: String = "BTC"
-  override def label: String = "Bitcoin"
-  override def factorToMsat: Long = 1000 * 100000 * 1000L // 1 btc = 1 000 00000 000 msat
+  override def code: String = "vips"
+  override def shortLabel: String = "VIPS"
+  override def label: String = "VIPSTARCOIN"
+  override def factorToMsat: Long = 1000 * 100000 * 1000L // 1 vips = 1 000 00000 000 msat
 }
 
 object CoinUtils extends Logging {
@@ -130,10 +130,10 @@ object CoinUtils extends Logging {
     * it has too many decimals because MilliSatoshi only accepts Long amount.
     *
     * @param amount numeric String, can be decimal.
-    * @param unit   bitcoin unit, can be milliSatoshi, Satoshi, Bits, milliBTC, BTC.
+    * @param unit   bitcoin unit, can be milliSatoshi, Satoshi, Bits, milliVIPS, VIPS.
     * @return       amount as a MilliSatoshi object.
     * @throws NumberFormatException    if the amount parameter is not numeric.
-    * @throws IllegalArgumentException if the unit is not equals to milliSatoshi, Satoshi or milliBTC.
+    * @throws IllegalArgumentException if the unit is not equals to milliSatoshi, Satoshi or milliVIPS.
     */
   @throws(classOf[NumberFormatException])
   @throws(classOf[IllegalArgumentException])
@@ -192,14 +192,14 @@ object CoinUtils extends Logging {
     case (a: Satoshi, MBtcUnit) => GUIMBtc(a.amount * SatUnit.factorToMsat)
     case (a: Satoshi, BtcUnit) => GUIBtc(a.amount * SatUnit.factorToMsat)
 
-    // amount is mbtc
+    // amount is mvips
     case (a: MilliBtc, MSatUnit) => GUIMSat((a.amount * MBtcUnit.factorToMsat).toLong)
     case (a: MilliBtc, SatUnit) => GUISat((a.amount * MBtcUnit.factorToMsat).toLong)
     case (a: MilliBtc, BitUnit) => GUIBits((a.amount * MBtcUnit.factorToMsat).toLong)
     case (a: MilliBtc, MBtcUnit) => GUIMBtc((a.amount * MBtcUnit.factorToMsat).toLong)
     case (a: MilliBtc, BtcUnit) => GUIBtc((a.amount * MBtcUnit.factorToMsat).toLong)
 
-    // amount is mbtc
+    // amount is mvips
     case (a: Btc, MSatUnit) => GUIMSat((a.amount * BtcUnit.factorToMsat).toLong)
     case (a: Btc, SatUnit) => GUISat((a.amount * BtcUnit.factorToMsat).toLong)
     case (a: Btc, BitUnit) => GUIBits((a.amount * BtcUnit.factorToMsat).toLong)
@@ -215,7 +215,7 @@ object CoinUtils extends Logging {
     * This method is useful for read only displays.
     *
     * @param amount BtcAmount
-    * @param withUnit if true, append the user unit shortLabel (mBTC, BTC, mSat...)
+    * @param withUnit if true, append the user unit shortLabel (mVIPS, VIPS, mSat...)
     * @return formatted amount
     */
   def formatAmountInUnit(amount: BtcAmount, unit: CoinUnit, withUnit: Boolean = false): String = {

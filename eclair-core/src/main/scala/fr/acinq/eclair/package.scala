@@ -108,7 +108,7 @@ package object eclair {
   def feerateKw2KB(feeratesPerKw: Long): Long = feeratesPerKw * 4
 
 
-  def isPay2PubkeyHash(address: String): Boolean = address.startsWith("1") || address.startsWith("m") || address.startsWith("n")
+  def isPay2PubkeyHash(address: String): Boolean = address.startsWith("V") || address.startsWith("m") || address.startsWith("n")
 
   /**
     * Tests whether the binary data is composed solely of printable ASCII characters (see BOLT 1)
@@ -144,9 +144,9 @@ package object eclair {
         Try(Bech32.decodeWitnessAddress(address)) match {
           case Success((_, version, _)) if version != 0.toByte => throw new IllegalArgumentException(s"invalid version $version in bech32 address")
           case Success((_, _, bin)) if bin.length != 20 && bin.length != 32 => throw new IllegalArgumentException("hash length in bech32 address must be either 20 or 32 bytes")
-          case Success(("bc", _, bin)) if chainHash == Block.LivenetGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
-          case Success(("tb", _, bin)) if chainHash == Block.TestnetGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
-          case Success(("bcrt", _, bin)) if chainHash == Block.RegtestGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
+          case Success(("vips", _, bin)) if chainHash == Block.LivenetGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
+          case Success(("tvips", _, bin)) if chainHash == Block.TestnetGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
+          case Success(("rvips", _, bin)) if chainHash == Block.RegtestGenesisBlock.hash => OP_0 :: OP_PUSHDATA(bin) :: Nil
           case Success(_) => throw new IllegalArgumentException("bech32 address does not match our blockchain")
           case Failure(bech32error) => throw new IllegalArgumentException(s"$address is neither a valid Base58 address ($base58error) nor a valid Bech32 address ($bech32error)")
         }

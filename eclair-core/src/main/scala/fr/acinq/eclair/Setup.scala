@@ -136,13 +136,13 @@ class Setup(datadir: File,
       } yield (progress, chainHash, bitcoinVersion, unspentAddresses, blocks, headers)
       // blocking sanity checks
       val (progress, chainHash, bitcoinVersion, unspentAddresses, blocks, headers) = await(future, 30 seconds, "bicoind did not respond after 30 seconds")
-      assert(bitcoinVersion >= 170000, "Eclair requires Bitcoin Core 0.17.0 or higher")
+      assert(bitcoinVersion >= 1010600, "Eclair requires VIPSTARCOIN Core 1.1.3 or higher")
       assert(chainHash == nodeParams.chainHash, s"chainHash mismatch (conf=${nodeParams.chainHash} != bitcoind=$chainHash)")
       if (chainHash != Block.RegtestGenesisBlock.hash) {
         assert(unspentAddresses.forall(address => !isPay2PubkeyHash(address)), "Make sure that all your UTXOS are segwit UTXOS and not p2pkh (check out our README for more details)")
       }
-      assert(progress > 0.999, s"bitcoind should be synchronized (progress=$progress")
-      assert(headers - blocks <= 1, s"bitcoind should be synchronized (headers=$headers blocks=$blocks")
+      assert(progress > 0.999, s"vipstarcoind should be synchronized (progress=$progress")
+      assert(headers - blocks <= 1, s"vipstarcoind should be synchronized (headers=$headers blocks=$blocks")
       Bitcoind(bitcoinClient)
     case ELECTRUM =>
       val addresses = config.hasPath("electrum") match {
@@ -372,11 +372,11 @@ case class Kit(nodeParams: NodeParams,
                server: ActorRef,
                wallet: EclairWallet)
 
-case object BitcoinZMQConnectionTimeoutException extends RuntimeException("could not connect to bitcoind using zeromq")
+case object BitcoinZMQConnectionTimeoutException extends RuntimeException("could not connect to vipstarcoind using zeromq")
 
-case object BitcoinRPCConnectionException extends RuntimeException("could not connect to bitcoind using json-rpc")
+case object BitcoinRPCConnectionException extends RuntimeException("could not connect to vipstarcoind using json-rpc")
 
-case object BitcoinWalletDisabledException extends RuntimeException("bitcoind must have wallet support enabled")
+case object BitcoinWalletDisabledException extends RuntimeException("vipstarcoind must have wallet support enabled")
 
 case object EmptyAPIPasswordException extends RuntimeException("must set a password for the json-rpc api")
 

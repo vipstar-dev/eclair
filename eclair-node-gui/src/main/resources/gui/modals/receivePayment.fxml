@@ -40,7 +40,7 @@
                     <children>
                         <Label styleClass="text-strong" text="Optional amount to receive"/>
                         <Label styleClass="label-description" wrapText="true" textAlignment="RIGHT"
-                               text="Maximum of ~0.042 BTC"/>
+                               text="Maximum of ~21.4 VIPS"/>
                     </children>
                 </VBox>
                 <TextField fx:id="amount" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
