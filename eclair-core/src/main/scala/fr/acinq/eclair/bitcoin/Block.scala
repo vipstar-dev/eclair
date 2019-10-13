@@ -155,17 +155,17 @@ object Block extends BtcSerializer[Block] {
 
   // genesis blocks
   val LivenetGenesisBlock = {
-    val script = OP_PUSHDATA(writeUInt32(488804799L)) :: OP_PUSHDATA(hex"04") :: OP_PUSHDATA(ByteVector("Sep 02, 2017 Bitcoin breaks $5,000 in latest price frenzy".getBytes("UTF-8"))) :: Nil
-    val scriptPubKey = OP_PUSHDATA(hex"040d61d8653448c98731ee5fffd303c15e71ec2057b77f11ab3601979728cdaff2d68afbba14e4fa0bc44f2072b0b23ef63717f8cdfbe58dcd33f32b6afe98741a") :: OP_CHECKSIG :: Nil
+    val script = OP_PUSHDATA(writeUInt32(488804799L)) :: OP_PUSHDATA(hex"04") :: OP_PUSHDATA(ByteVector("vip quality on the world!!".getBytes("UTF-8"))) :: Nil
+    val scriptPubKey = OP_PUSHDATA(hex"766970207175616c697479206f6e2074686520776f726c642121766970207175616c697479206f6e2074686520776f726c642121766970207175616c697479206f") :: OP_CHECKSIG :: Nil
     Block(
-      BlockHeader(version = 1, hashPreviousBlock = ByteVector32.Zeroes, hashMerkleRoot = ByteVector32(hex"6db905142382324db417761891f2d2f355ea92f27ab0fc35e59e90b50e0534ed"), time = 1504695029, bits = 0x1f00ffff, nonce = 8026361,
+      BlockHeader(version = 1, hashPreviousBlock = ByteVector32.Zeroes, hashMerkleRoot = ByteVector32(hex"25b61b421f9efb0b6e4a44ce6aa465c310930cae6c57898324264663e4b12138"), time = 1522223204, bits = 0x1f00ffff, nonce = 135269,
         hashStateRoot = ByteVector32(hex"e965ffd002cd6ad0e2dc402b8044de833e06b23127ea8c3d80aec91410771495"),
         hashUTXORoot = ByteVector32(hex"56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
           prev_stake_hash = ByteVector32.Zeroes, prev_stake_n = 0xffffffff, sizeVchSig = 0, vchSig = Array()),
       List(
         Transaction(version = 1,
           txIn = List(TxIn.coinbase(script)),
-          txOut = List(TxOut(amount = 50 btc, publicKeyScript = scriptPubKey)),
+          txOut = List(TxOut(amount = 1 btc, publicKeyScript = scriptPubKey)),
           lockTime = 0))
     )
   }
